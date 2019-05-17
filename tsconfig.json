@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+      "baseUrl": ".",
+      "paths": { "*": ["types/*"] },
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": "./built",
+    "strict": true,
+    "target": "ESNEXT"
+  },
+  "include": [
+    "./src/**/*"
+  ]
+}
