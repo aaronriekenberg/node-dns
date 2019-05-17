@@ -116,7 +116,7 @@ const main = () => {
         serverSocket.bind(SERVER_PORT);
     });
 
-    remoteSocket.on('message', (message, remoteInfo) => {
+    remoteSocket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
         const decodedObject = dnsPacket.decode(message, null);
         logger.info(`remoteSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
 
