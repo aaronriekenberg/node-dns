@@ -42,9 +42,9 @@ class OutgoingRequestInfo {
 };
 
 class CacheObject {
+
     constructor(
         readonly decodedResponse: any) {
-
     }
 };
 
