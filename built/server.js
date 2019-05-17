@@ -17,13 +17,28 @@ const logger = winston.createLogger({
     }), winston.format.printf((info) => `${info.timestamp} ${info.level}: ${info.message}`)),
     transports: [new winston.transports.Console()]
 });
-const getRandomInt = (min, max) => {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
+const getRandomDNSID = () => {
+    const getRandomInt = (min, max) => {
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+    };
+    return getRandomInt(1, 65534);
 };
-const getRandomDNSID = () => getRandomInt(1, 65534);
 const SERVER_PORT = 10053;
 const REMOTE_IP = '8.8.8.8';
 const REMOTE_PORT = 53;
+class OutgoingRequestInfo {
+    constructor(clientRemoteInfo, clientRequestID) {
+        this.clientRemoteInfo = clientRemoteInfo;
+        this.clientRequestID = clientRequestID;
+    }
+}
+;
+class CacheObject {
+    constructor(decodedResponse) {
+        this.decodedResponse = decodedResponse;
+    }
+}
+;
 const main = () => {
     logger.info('begin main');
     const outgoingIDToRequestInfo = new Map();
@@ -38,7 +53,7 @@ const main = () => {
         logger.info(`serverSocket listening on ${stringify(serverSocket.address())}`);
     });
     serverSocket.on('message', (message, remoteInfo) => {
-        const decodedObject = dnsPacket.decode(message, 0);
+        const decodedObject = dnsPacket.decode(message, null);
         logger.info(`serverSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
         let cacheHit = false;
         if (decodedObject.questions &&
@@ -47,10 +62,11 @@ const main = () => {
             const question = decodedObject.questions[0];
             const questionCacheKey = `${question.name}_${question.type}_${question.class}`;
             logger.info(`questionCacheKey = ${questionCacheKey}`);
-            const cachedResponse = questionToResponse.get(questionCacheKey);
-            if (cachedResponse) {
+            const cacheObject = questionToResponse.get(questionCacheKey);
+            if (cacheObject) {
+                const cachedResponse = cacheObject.decodedResponse;
                 cachedResponse.id = decodedObject.id;
-                const outgoingMessage = dnsPacket.encode(cachedResponse, 0);
+                const outgoingMessage = dnsPacket.encode(cachedResponse, null, null);
                 serverSocket.send(outgoingMessage, 0, outgoingMessage.length, remoteInfo.port, remoteInfo.address);
                 cacheHit = true;
             }
@@ -58,10 +74,7 @@ const main = () => {
         logger.info(`cacheHit = ${cacheHit}`);
         if (!cacheHit) {
             const outgoingID = getRandomDNSID();
-            outgoingIDToRequestInfo.set(outgoingID, {
-                remoteInfo,
-                clientID: decodedObject.id
-            });
+            outgoingIDToRequestInfo.set(outgoingID, new OutgoingRequestInfo(remoteInfo, decodedObject.id));
             decodedObject.id = outgoingID;
             const outgoingMessage = dnsPacket.encode(decodedObject, null, null);
             remoteSocket.send(outgoingMessage, 0, outgoingMessage.length, REMOTE_PORT, REMOTE_IP);
@@ -85,14 +98,15 @@ const main = () => {
             const question = decodedObject.questions[0];
             const questionCacheKey = `${question.name}_${question.type}_${question.class}`;
             logger.info(`questionCacheKey = ${questionCacheKey}`);
-            questionToResponse.set(questionCacheKey, decodedObject);
+            const cacheObject = new CacheObject(decodedObject);
+            questionToResponse.set(questionCacheKey, cacheObject);
         }
         const clientRequestInfo = outgoingIDToRequestInfo.get(decodedObject.id);
         if (clientRequestInfo) {
             outgoingIDToRequestInfo.delete(decodedObject.id);
-            decodedObject.id = clientRequestInfo.clientID;
+            decodedObject.id = clientRequestInfo.clientRequestID;
             const outgoingMessage = dnsPacket.encode(decodedObject, null, null);
-            const clientRemoteInfo = clientRequestInfo.remoteInfo;
+            const clientRemoteInfo = clientRequestInfo.clientRemoteInfo;
             serverSocket.send(outgoingMessage, 0, outgoingMessage.length, clientRemoteInfo.port, clientRemoteInfo.address);
         }
     });
