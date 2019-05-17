@@ -2,7 +2,8 @@
 
 const dnsPacket = require('dns-packet')
 const dgram = require('dgram')
-const winston = require("winston");
+const process = require('process');
+const winston = require('winston');
 
 const stringify = JSON.stringify;
 const stringifyPretty = (object) => stringify(object, null, 2);
@@ -26,56 +27,109 @@ const getRandomInt = (min, max) => {
 
 const getRandomDNSID = () => getRandomInt(1, 65534);
 
+const SERVER_PORT = 10053;
+
+const REMOTE_IP = '8.8.8.8';
+const REMOTE_PORT = 53;
+
 const main = () => {
     logger.info('begin main');
 
     const outgoingIDToRequestInfo = new Map();
+    const questionToResponse = new Map();
 
-    const remoteSocket = dgram.createSocket('udp4');
     const serverSocket = dgram.createSocket('udp4');
-    serverSocket.bind(10053, () => {
-        logger.info(`serverSocket.address = ${stringify(serverSocket.address())}`);
+    const remoteSocket = dgram.createSocket('udp4');
 
-        remoteSocket.bind(() => {
-            logger.info(`remoteSocket.address = ${stringify(remoteSocket.address())}`);
-
-            remoteSocket.on('message', (message, remoteInfo) => {
-                const decodedObject = dnsPacket.decode(message);
-                logger.info(`remoteSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
-
-                const clientRequestInfo = outgoingIDToRequestInfo.get(decodedObject.id);
-                if (clientRequestInfo) {
-                    outgoingIDToRequestInfo.delete(decodedObject.id);
-
-                    decodedObject.id = clientRequestInfo.clientID;
-                    const outgoingMessage = dnsPacket.encode(decodedObject);
-
-                    const clientRemoteInfo = clientRequestInfo.remoteInfo;
-
-                    serverSocket.send(outgoingMessage, 0, outgoingMessage.length, clientRemoteInfo.port, clientRemoteInfo.address);
-                }
-            });
-
-            serverSocket.on('message', (message, remoteInfo) => {
-                const decodedObject = dnsPacket.decode(message);
-                logger.info(`serverSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
-
-                const outgoingID = getRandomDNSID();
-
-                outgoingIDToRequestInfo.set(outgoingID, {
-                    remoteInfo,
-                    clientID: decodedObject.id
-                });
-
-                decodedObject.id = outgoingID;
-                const outgoingMessage = dnsPacket.encode(decodedObject);
-
-                remoteSocket.send(outgoingMessage, 0, outgoingMessage.length, 53, '8.8.8.8')
-            });
-        });
+    serverSocket.on('error', (err) => {
+        logger.warn(`serverSocketError ${formatError(err)}`);
+        process.exit(1);
     });
 
+    serverSocket.on('listening', () => {
+        logger.info(`serverSocket listening on ${stringify(serverSocket.address())}`);
+    });
 
+    serverSocket.on('message', (message, remoteInfo) => {
+        const decodedObject = dnsPacket.decode(message);
+        logger.info(`serverSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
+
+        let cacheHit = false;
+
+        if (decodedObject.questions &&
+            (decodedObject.questions.length === 1) &&
+            (decodedObject.questions[0].type === 'A')) {
+            const question = decodedObject.questions[0];
+            const questionCacheKey = `${question.name}_${question.type}_${question.class}`;
+            logger.info(`questionCacheKey = ${questionCacheKey}`);
+
+            const cachedResponse = questionToResponse.get(questionCacheKey);
+            if (cachedResponse) {
+                cachedResponse.id = decodedObject.id;
+                const outgoingMessage = dnsPacket.encode(cachedResponse);
+
+                serverSocket.send(outgoingMessage, 0, outgoingMessage.length, remoteInfo.port, remoteInfo.address);
+
+                cacheHit = true;
+            }
+        }
+
+        logger.info(`cacheHit = ${cacheHit}`);
+
+        if (!cacheHit) {
+            const outgoingID = getRandomDNSID();
+
+            outgoingIDToRequestInfo.set(outgoingID, {
+                remoteInfo,
+                clientID: decodedObject.id
+            });
+
+            decodedObject.id = outgoingID;
+            const outgoingMessage = dnsPacket.encode(decodedObject);
+
+            remoteSocket.send(outgoingMessage, 0, outgoingMessage.length, REMOTE_PORT, REMOTE_IP);
+        }
+    });
+
+    remoteSocket.on('error', (err) => {
+        logger.warn(`remoteSocket ${formatError(err)}`);
+        process.exit(1);
+    });
+
+    remoteSocket.on('listening', () => {
+        logger.info(`remoteSocket listening on ${stringify(remoteSocket.address())}`);
+
+        serverSocket.bind(SERVER_PORT);
+    });
+
+    remoteSocket.on('message', (message, remoteInfo) => {
+        const decodedObject = dnsPacket.decode(message);
+        logger.info(`remoteSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
+
+        if (decodedObject.questions &&
+            (decodedObject.questions.length === 1) &&
+            (decodedObject.questions[0].type === 'A') &&
+            (decodedObject.rcode === 'NOERROR')) {
+            const question = decodedObject.questions[0];
+            const questionCacheKey = `${question.name}_${question.type}_${question.class}`;
+            logger.info(`questionCacheKey = ${questionCacheKey}`);
+            questionToResponse.set(questionCacheKey, decodedObject);
+        }
+
+        const clientRequestInfo = outgoingIDToRequestInfo.get(decodedObject.id);
+        if (clientRequestInfo) {
+            outgoingIDToRequestInfo.delete(decodedObject.id);
+
+            decodedObject.id = clientRequestInfo.clientID;
+            const outgoingMessage = dnsPacket.encode(decodedObject);
+
+            const clientRemoteInfo = clientRequestInfo.remoteInfo;
+
+            serverSocket.send(outgoingMessage, 0, outgoingMessage.length, clientRemoteInfo.port, clientRemoteInfo.address);
+        }
+    });
+
+    remoteSocket.bind();
 };
 
 main();
