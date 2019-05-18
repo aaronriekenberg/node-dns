@@ -226,7 +226,7 @@ class DNSProxy {
         logger.info('begin start');
         setInterval(() => this.timerPop(), TIMER_INTERVAL_SECONDS * 1000);
         this.serverSocket.on('error', (err) => {
-            logger.warn(`serverSocketError ${formatError(err)}`);
+            logger.warn(`serverSocket error ${formatError(err)}`);
             if (!this.serverSocketListening) {
                 process.exit(1);
             }
@@ -239,7 +239,7 @@ class DNSProxy {
             this.handleServerSocketMessage(message, remoteInfo);
         });
         this.remoteSocket.on('error', (err) => {
-            logger.warn(`remoteSocket ${formatError(err)}`);
+            logger.warn(`remoteSocket error ${formatError(err)}`);
         });
         this.remoteSocket.on('listening', () => {
             logger.info(`remoteSocket listening on ${stringify(this.remoteSocket.address())}`);
