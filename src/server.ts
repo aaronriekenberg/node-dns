@@ -33,19 +33,77 @@ const SERVER_PORT = 10053;
 const REMOTE_IP = '8.8.8.8';
 const REMOTE_PORT = 53;
 
+const MIN_TTL_SECONDS = 300;
+const REQUEST_TIMEOUT_SECONDS = 10;
+
 class OutgoingRequestInfo {
 
     constructor(
         readonly clientRemoteInfo: dgram.RemoteInfo,
-        readonly clientRequestID: number) {
+        readonly clientRequestID: number,
+        readonly expirationTimeSeconds: number) {
+
+    }
+
+    expired(nowSeconds: number): boolean {
+        return nowSeconds >= this.expirationTimeSeconds;
     }
 };
 
 class CacheObject {
 
     constructor(
-        readonly decodedResponse: any) {
+        readonly decodedResponse: any,
+        readonly cacheTimeSeconds: number,
+        readonly expirationTimeSeconds: number) {
+
     }
+
+    expired(nowSeconds: number): boolean {
+        return nowSeconds >= this.expirationTimeSeconds;
+    }
+};
+
+const getNowSeconds = (): number => {
+    const now = new Date();
+    now.setMilliseconds(0);
+    return now.getTime() / 1000.;
+};
+
+const originalTTLSymbol = Symbol('originalTTL');
+
+const getMinTTLSecondsForAnswers = (answers: any): number | undefined => {
+    let minTTL: number | undefined;
+    (answers || []).forEach((answer: any) => {
+        if ((answer.ttl === undefined) || (answer.ttl === null) || (answer.ttl < MIN_TTL_SECONDS)) {
+            answer.ttl = MIN_TTL_SECONDS;
+        }
+        answer[originalTTLSymbol] = answer.ttl;
+        if ((minTTL === undefined) || (answer.ttl < minTTL)) {
+            minTTL = answer.ttl;
+        }
+    });
+    return minTTL;
+};
+
+const adjustTTL = (cacheObject: CacheObject): boolean => {
+    let valid = true;
+
+    const nowSeconds = getNowSeconds();
+
+    const secondsUntilExpiration = cacheObject.expirationTimeSeconds - nowSeconds;
+
+    if (secondsUntilExpiration <= 0) {
+        valid = false;
+    } else {
+        const secondsInCache = nowSeconds - cacheObject.cacheTimeSeconds;
+        (cacheObject.decodedResponse.answers || []).forEach((answer: any) => {
+            answer.ttl = answer[originalTTLSymbol] - secondsInCache;
+            // logger.info(`new answer.ttl = ${answer.ttl}`);
+        });
+    }
+
+    return valid;
 };
 
 const main = () => {
@@ -53,6 +111,38 @@ const main = () => {
 
     const outgoingIDToRequestInfo = new Map<number, OutgoingRequestInfo>();
     const questionToResponse = new Map<string, CacheObject>();
+
+    let cacheHits = 0;
+    let cacheMisses = 0;
+
+    setInterval(() => {
+        logger.info('begin timer pop');
+
+        const nowSeconds = getNowSeconds();
+
+        const expiredOutgoingIDs: number[] = [];
+        for (const entry of outgoingIDToRequestInfo) {
+            if (entry[1].expired(nowSeconds)) {
+                expiredOutgoingIDs.push(entry[0]);
+            }
+        }
+        expiredOutgoingIDs.forEach((id) => {
+            outgoingIDToRequestInfo.delete(id);
+        });
+
+        const expiredQuestions: string[] = [];
+        for (const entry of questionToResponse) {
+            if (entry[1].expired(nowSeconds)) {
+                expiredQuestions.push(entry[0]);
+            }
+        }
+        expiredOutgoingIDs.forEach((id) => {
+            outgoingIDToRequestInfo.delete(id);
+        });
+
+        logger.info(`end timer pop cacheHits=${cacheHits} cacheMisses=${cacheMisses} expiredOutgoingIDs=${expiredOutgoingIDs.length} expiredQuestions=${expiredQuestions.length} outgoingIDToRequestInfo=${outgoingIDToRequestInfo.size} questionToResponse=${questionToResponse.size}`);
+
+    }, 10000);
 
     const serverSocket = dgram.createSocket('udp4');
     const remoteSocket = dgram.createSocket('udp4');
@@ -68,35 +158,44 @@ const main = () => {
 
     serverSocket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
         const decodedObject = dnsPacket.decode(message, null);
-        logger.info(`serverSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
 
         let cacheHit = false;
 
         if (decodedObject.questions &&
             (decodedObject.questions.length === 1) &&
             (decodedObject.questions[0].type === 'A')) {
+
             const question = decodedObject.questions[0];
             const questionCacheKey = `${question.name}_${question.type}_${question.class}`;
-            logger.info(`questionCacheKey = ${questionCacheKey}`);
 
             const cacheObject = questionToResponse.get(questionCacheKey);
             if (cacheObject) {
-                const cachedResponse = cacheObject.decodedResponse;
-                cachedResponse.id = decodedObject.id;
+                if (adjustTTL(cacheObject)) {
+                    const cachedResponse = cacheObject.decodedResponse;
+                    cachedResponse.id = decodedObject.id;
 
-                const outgoingMessage = dnsPacket.encode(cachedResponse, null, null);
-                serverSocket.send(outgoingMessage, 0, outgoingMessage.length, remoteInfo.port, remoteInfo.address);
+                    const outgoingMessage = dnsPacket.encode(cachedResponse, null, null);
+                    serverSocket.send(outgoingMessage, 0, outgoingMessage.length, remoteInfo.port, remoteInfo.address);
 
-                cacheHit = true;
+                    cacheHit = true;
+
+                    ++cacheHits;
+                } else {
+                    logger.info(`remove expired cache key ${questionCacheKey}`);
+                    questionToResponse.delete(questionCacheKey);
+                }
             }
         }
 
-        logger.info(`cacheHit = ${cacheHit}`);
-
         if (!cacheHit) {
+            ++cacheMisses;
+
             const outgoingID = getRandomDNSID();
 
-            outgoingIDToRequestInfo.set(outgoingID, new OutgoingRequestInfo(remoteInfo, decodedObject.id));
+            const requestTimeoutSeconds = getNowSeconds() + REQUEST_TIMEOUT_SECONDS;
+
+            outgoingIDToRequestInfo.set(outgoingID,
+                new OutgoingRequestInfo(remoteInfo, decodedObject.id, requestTimeoutSeconds));
 
             decodedObject.id = outgoingID;
             const outgoingMessage = dnsPacket.encode(decodedObject, null, null);
@@ -118,18 +217,27 @@ const main = () => {
 
     remoteSocket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
         const decodedObject = dnsPacket.decode(message, null);
-        logger.info(`remoteSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
+        // logger.info(`remoteSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
 
-        if (decodedObject.questions &&
+        if ((decodedObject.rcode === 'NOERROR') &&
+            decodedObject.questions &&
             (decodedObject.questions.length === 1) &&
-            (decodedObject.questions[0].type === 'A') &&
-            (decodedObject.rcode === 'NOERROR')) {
-            const question = decodedObject.questions[0];
-            const questionCacheKey = `${question.name}_${question.type}_${question.class}`;
-            logger.info(`questionCacheKey = ${questionCacheKey}`);
+            (decodedObject.questions[0].type === 'A')) {
 
-            const cacheObject = new CacheObject(decodedObject);
-            questionToResponse.set(questionCacheKey, cacheObject);
+            const minTTLSeconds = getMinTTLSecondsForAnswers(decodedObject.answers);
+
+            if ((minTTLSeconds !== undefined) && (minTTLSeconds > 0)) {
+                const question = decodedObject.questions[0];
+                const questionCacheKey = `${question.name}_${question.type}_${question.class}`;
+
+                const nowSeconds = getNowSeconds();
+                const expirationTimeSeconds = nowSeconds + minTTLSeconds;
+
+                const cacheObject = new CacheObject(
+                    decodedObject, nowSeconds, expirationTimeSeconds);
+
+                questionToResponse.set(questionCacheKey, cacheObject);
+            }
         }
 
         const clientRequestInfo = outgoingIDToRequestInfo.get(decodedObject.id);
