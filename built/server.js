@@ -93,6 +93,7 @@ class DNSProxy {
         this.questionToResponsePriorityQueue = new tinyqueue_1.default([], (a, b) => a.compareByExpirationTime(b));
         this.cacheHits = 0;
         this.cacheMisses = 0;
+        this.lastMissKeys = [];
         this.serverSocket = dgram.createSocket('udp4');
         this.serverSocketListening = false;
         this.remoteSocket = dgram.createSocket('udp4');
@@ -169,6 +170,8 @@ class DNSProxy {
         logger.info(`end timer pop cacheHits=${this.cacheHits} cacheMisses=${this.cacheMisses}` +
             ` expiredOutgoingIDs=${expiredOutgoingIDs} outgoingIDToRequestInfo=${this.outgoingIDToRequestInfo.size} outgoingRequestInfoPriorityQueue=${this.outgoingRequestInfoPriorityQueue.length}` +
             ` expiredQuestionCacheKeys=${expiredQuestionCacheKeys} questionToResponse=${this.questionToResponse.size} questionToResponsePriorityQueue=${this.questionToResponsePriorityQueue.length}`);
+        logger.info(`lastMissKey = ${this.lastMissKeys}`);
+        this.lastMissKeys = [];
     }
     handleServerSocketMessage(message, remoteInfo) {
         const decodedObject = dnsPacket.decode(message, null);
@@ -184,6 +187,12 @@ class DNSProxy {
                 this.serverSocket.send(outgoingMessage, 0, outgoingMessage.length, remoteInfo.port, remoteInfo.address);
                 cacheHit = true;
                 ++this.cacheHits;
+            }
+            else {
+                this.lastMissKeys.push(questionCacheKey);
+                while (this.lastMissKeys.length > 10) {
+                    this.lastMissKeys.shift();
+                }
             }
         }
         if (!cacheHit) {
