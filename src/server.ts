@@ -90,16 +90,19 @@ const getNowSeconds = (): number => {
 
 class DNSProxy {
 
-    private static originalTTLSymbol = Symbol('originalTTL');
+    private static readonly originalTTLSymbol = Symbol('originalTTL');
 
-    private outgoingIDToRequestInfo = new Map<number, OutgoingRequestInfo>();
-    private outgoingRequestInfoPriorityQueue = new TinyQueue<OutgoingRequestInfo>([], (a: OutgoingRequestInfo, b: OutgoingRequestInfo) => a.compareByExpirationTime(b));
+    private readonly outgoingIDToRequestInfo = new Map<number, OutgoingRequestInfo>();
+    private readonly outgoingRequestInfoPriorityQueue = new TinyQueue<OutgoingRequestInfo>([], (a: OutgoingRequestInfo, b: OutgoingRequestInfo) => a.compareByExpirationTime(b));
 
-    private questionToResponse = new Map<string, CacheObject>();
-    private questionToResponsePriorityQueue = new TinyQueue<CacheObject>([], (a: CacheObject, b: CacheObject) => a.compareByExpirationTime(b));
+    private readonly questionToResponse = new Map<string, CacheObject>();
+    private readonly questionToResponsePriorityQueue = new TinyQueue<CacheObject>([], (a: CacheObject, b: CacheObject) => a.compareByExpirationTime(b));
 
     private cacheHits: number = 0;
     private cacheMisses: number = 0;
+
+    private readonly serverSocket = dgram.createSocket('udp4');
+    private readonly remoteSocket = dgram.createSocket('udp4');
 
     private getRandomDNSID(): number {
         const getRandomInt = (min: number, max: number): number => {
@@ -143,65 +146,62 @@ class DNSProxy {
         return valid;
     }
 
+    private timerPop() {
+        logger.info('begin timer pop');
+
+        const nowSeconds = getNowSeconds();
+        let done: boolean;
+
+        done = false;
+        const expiredOutgoingIDs: number[] = [];
+        while ((this.outgoingRequestInfoPriorityQueue.length > 0) && (!done)) {
+            const outgoingRequestInfo = this.outgoingRequestInfoPriorityQueue.peek();
+            if (outgoingRequestInfo && outgoingRequestInfo.expired(nowSeconds)) {
+                this.outgoingRequestInfoPriorityQueue.pop();
+                expiredOutgoingIDs.push(outgoingRequestInfo.outgoingRequestID);
+            } else {
+                done = true;
+            }
+        }
+        expiredOutgoingIDs.forEach((id) => {
+            this.outgoingIDToRequestInfo.delete(id);
+        });
+
+        done = false;
+        const expiredQuestionCacheKeys: string[] = [];
+        while ((this.questionToResponsePriorityQueue.length > 0) && (!done)) {
+            const cacheObject = this.questionToResponsePriorityQueue.peek();
+            if (cacheObject && cacheObject.expired(nowSeconds)) {
+                this.questionToResponsePriorityQueue.pop();
+                expiredQuestionCacheKeys.push(cacheObject.questionCacheKey);
+            } else {
+                done = true;
+            }
+        }
+        expiredQuestionCacheKeys.forEach((questionCacheKey) => {
+            this.questionToResponse.delete(questionCacheKey);
+        });
+
+        logger.info(`end timer pop cacheHits=${this.cacheHits} cacheMisses=${this.cacheMisses}` +
+            ` expiredOutgoingIDs=${expiredOutgoingIDs.length} outgoingIDToRequestInfo=${this.outgoingIDToRequestInfo.size} outgoingRequestInfoPriorityQueue=${this.outgoingRequestInfoPriorityQueue.length}` +
+            ` expiredQuestionCacheKeys=${expiredQuestionCacheKeys.length} questionToResponse=${this.questionToResponse.size} questionToResponsePriorityQueue=${this.questionToResponsePriorityQueue.length}`);
+    }
+
     start() {
         logger.info('begin start');
 
+        setInterval(() => this.timerPop(), TIMER_INTERVAL_SECONDS * 1000);
 
-        setInterval(() => {
-            logger.info('begin timer pop');
-
-            const nowSeconds = getNowSeconds();
-            let done: boolean;
-
-            done = false;
-            const expiredOutgoingIDs: number[] = [];
-            while ((this.outgoingRequestInfoPriorityQueue.length > 0) && (!done)) {
-                const outgoingRequestInfo = this.outgoingRequestInfoPriorityQueue.peek();
-                if (outgoingRequestInfo && outgoingRequestInfo.expired(nowSeconds)) {
-                    this.outgoingRequestInfoPriorityQueue.pop();
-                    expiredOutgoingIDs.push(outgoingRequestInfo.outgoingRequestID);
-                } else {
-                    done = true;
-                }
-            }
-            expiredOutgoingIDs.forEach((id) => {
-                this.outgoingIDToRequestInfo.delete(id);
-            });
-
-            done = false;
-            const expiredQuestionCacheKeys: string[] = [];
-            while ((this.questionToResponsePriorityQueue.length > 0) && (!done)) {
-                const cacheObject = this.questionToResponsePriorityQueue.peek();
-                if (cacheObject && cacheObject.expired(nowSeconds)) {
-                    this.questionToResponsePriorityQueue.pop();
-                    expiredQuestionCacheKeys.push(cacheObject.questionCacheKey);
-                } else {
-                    done = true;
-                }
-            }
-            expiredQuestionCacheKeys.forEach((questionCacheKey) => {
-                this.questionToResponse.delete(questionCacheKey);
-            });
-
-            logger.info(`end timer pop cacheHits=${this.cacheHits} cacheMisses=${this.cacheMisses}` +
-                ` expiredOutgoingIDs=${expiredOutgoingIDs.length} outgoingIDToRequestInfo=${this.outgoingIDToRequestInfo.size} outgoingRequestInfoPriorityQueue=${this.outgoingRequestInfoPriorityQueue.length}` +
-                ` expiredQuestionCacheKeys=${expiredQuestionCacheKeys.length} questionToResponse=${this.questionToResponse.size} questionToResponsePriorityQueue=${this.questionToResponsePriorityQueue.length}`);
-
-        }, TIMER_INTERVAL_SECONDS * 1000);
-
-        const serverSocket = dgram.createSocket('udp4');
-        const remoteSocket = dgram.createSocket('udp4');
-
-        serverSocket.on('error', (err) => {
+        this.serverSocket.on('error', (err) => {
             logger.warn(`serverSocketError ${formatError(err)}`);
             process.exit(1);
         });
 
-        serverSocket.on('listening', () => {
-            logger.info(`serverSocket listening on ${stringify(serverSocket.address())}`);
+        this.serverSocket.on('listening', () => {
+            logger.info(`serverSocket listening on ${stringify(this.serverSocket.address())}`);
         });
 
-        serverSocket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
+        this.serverSocket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
             const decodedObject = dnsPacket.decode(message, null);
 
             let cacheHit = false;
@@ -218,7 +218,7 @@ class DNSProxy {
                     cachedResponse.id = decodedObject.id;
 
                     const outgoingMessage = dnsPacket.encode(cachedResponse, null, null);
-                    serverSocket.send(outgoingMessage, 0, outgoingMessage.length, remoteInfo.port, remoteInfo.address);
+                    this.serverSocket.send(outgoingMessage, 0, outgoingMessage.length, remoteInfo.port, remoteInfo.address);
 
                     cacheHit = true;
 
@@ -242,22 +242,22 @@ class DNSProxy {
                 decodedObject.id = outgoingID;
                 const outgoingMessage = dnsPacket.encode(decodedObject, null, null);
 
-                remoteSocket.send(outgoingMessage, 0, outgoingMessage.length, REMOTE_PORT, REMOTE_IP);
+                this.remoteSocket.send(outgoingMessage, 0, outgoingMessage.length, REMOTE_PORT, REMOTE_IP);
             }
         });
 
-        remoteSocket.on('error', (err) => {
+        this.remoteSocket.on('error', (err) => {
             logger.warn(`remoteSocket ${formatError(err)}`);
             process.exit(1);
         });
 
-        remoteSocket.on('listening', () => {
-            logger.info(`remoteSocket listening on ${stringify(remoteSocket.address())}`);
+        this.remoteSocket.on('listening', () => {
+            logger.info(`remoteSocket listening on ${stringify(this.remoteSocket.address())}`);
 
-            serverSocket.bind(SERVER_PORT);
+            this.serverSocket.bind(SERVER_PORT);
         });
 
-        remoteSocket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
+        this.remoteSocket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
             const decodedObject = dnsPacket.decode(message, null);
             // logger.info(`remoteSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
 
@@ -291,11 +291,11 @@ class DNSProxy {
 
                 const clientRemoteInfo = clientRequestInfo.clientRemoteInfo;
 
-                serverSocket.send(outgoingMessage, 0, outgoingMessage.length, clientRemoteInfo.port, clientRemoteInfo.address);
+                this.serverSocket.send(outgoingMessage, 0, outgoingMessage.length, clientRemoteInfo.port, clientRemoteInfo.address);
             }
         });
 
-        remoteSocket.bind();
+        this.remoteSocket.bind();
     }
 
 };
