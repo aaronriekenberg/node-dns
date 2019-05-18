@@ -2,6 +2,7 @@
 
 import * as dnsPacket from 'dns-packet';
 import * as dgram from 'dgram';
+import TinyQueue from 'tinyqueue';
 import * as process from 'process';
 import * as winston from 'winston';
 
@@ -33,12 +34,15 @@ const SERVER_PORT = 10053;
 const REMOTE_IP = '8.8.8.8';
 const REMOTE_PORT = 53;
 
-const MIN_TTL_SECONDS = 300;
+const MIN_TTL_SECONDS = 10;
 const REQUEST_TIMEOUT_SECONDS = 10;
+
+const TIMER_INTERVAL_SECONDS = 10;
 
 class OutgoingRequestInfo {
 
     constructor(
+        readonly outgoingRequestID: number,
         readonly clientRemoteInfo: dgram.RemoteInfo,
         readonly clientRequestID: number,
         readonly expirationTimeSeconds: number) {
@@ -48,11 +52,22 @@ class OutgoingRequestInfo {
     expired(nowSeconds: number): boolean {
         return nowSeconds >= this.expirationTimeSeconds;
     }
+
+    compareByExpirationTime(other: OutgoingRequestInfo): number {
+        if (this.expirationTimeSeconds < other.expirationTimeSeconds) {
+            return -1;
+        } else if (this.expirationTimeSeconds === other.expirationTimeSeconds) {
+            return 0;
+        } else {
+            return 1;
+        }
+    }
 };
 
 class CacheObject {
 
     constructor(
+        readonly questionCacheKey: string,
         readonly decodedResponse: any,
         readonly cacheTimeSeconds: number,
         readonly expirationTimeSeconds: number) {
@@ -61,6 +76,16 @@ class CacheObject {
 
     expired(nowSeconds: number): boolean {
         return nowSeconds >= this.expirationTimeSeconds;
+    }
+
+    compareByExpirationTime(other: CacheObject): number {
+        if (this.expirationTimeSeconds < other.expirationTimeSeconds) {
+            return -1;
+        } else if (this.expirationTimeSeconds === other.expirationTimeSeconds) {
+            return 0;
+        } else {
+            return 1;
+        }
     }
 };
 
@@ -110,7 +135,10 @@ const main = () => {
     logger.info('begin main');
 
     const outgoingIDToRequestInfo = new Map<number, OutgoingRequestInfo>();
+    const outgoingRequestInfoPriorityQueue = new TinyQueue<OutgoingRequestInfo>([], (a: OutgoingRequestInfo, b: OutgoingRequestInfo) => a.compareByExpirationTime(b));
+
     const questionToResponse = new Map<string, CacheObject>();
+    const questionToResponsePriorityQueue = new TinyQueue<CacheObject>([], (a: CacheObject, b: CacheObject) => a.compareByExpirationTime(b));
 
     let cacheHits = 0;
     let cacheMisses = 0;
@@ -119,30 +147,43 @@ const main = () => {
         logger.info('begin timer pop');
 
         const nowSeconds = getNowSeconds();
+        let done: boolean;
 
+        done = false;
         const expiredOutgoingIDs: number[] = [];
-        for (const entry of outgoingIDToRequestInfo) {
-            if (entry[1].expired(nowSeconds)) {
-                expiredOutgoingIDs.push(entry[0]);
+        while ((outgoingRequestInfoPriorityQueue.length > 0) && (!done)) {
+            const outgoingRequestInfo = outgoingRequestInfoPriorityQueue.peek();
+            if (outgoingRequestInfo && outgoingRequestInfo.expired(nowSeconds)) {
+                outgoingRequestInfoPriorityQueue.pop();
+                expiredOutgoingIDs.push(outgoingRequestInfo.outgoingRequestID);
+            } else {
+                done = true;
             }
         }
         expiredOutgoingIDs.forEach((id) => {
             outgoingIDToRequestInfo.delete(id);
         });
 
-        const expiredQuestions: string[] = [];
-        for (const entry of questionToResponse) {
-            if (entry[1].expired(nowSeconds)) {
-                expiredQuestions.push(entry[0]);
+        done = false;
+        const expiredQuestionCacheKeys: string[] = [];
+        while ((questionToResponsePriorityQueue.length > 0) && (!done)) {
+            const cacheObject = questionToResponsePriorityQueue.peek();
+            if (cacheObject && cacheObject.expired(nowSeconds)) {
+                questionToResponsePriorityQueue.pop();
+                expiredQuestionCacheKeys.push(cacheObject.questionCacheKey);
+            } else {
+                done = true;
             }
         }
-        expiredQuestions.forEach((question) => {
-            questionToResponse.delete(question);
+        expiredQuestionCacheKeys.forEach((questionCacheKey) => {
+            questionToResponse.delete(questionCacheKey);
         });
 
-        logger.info(`end timer pop cacheHits=${cacheHits} cacheMisses=${cacheMisses} expiredOutgoingIDs=${expiredOutgoingIDs.length} expiredQuestions=${expiredQuestions.length} outgoingIDToRequestInfo=${outgoingIDToRequestInfo.size} questionToResponse=${questionToResponse.size}`);
+        logger.info(`end timer pop cacheHits=${cacheHits} cacheMisses=${cacheMisses}` +
+            ` expiredOutgoingIDs=${expiredOutgoingIDs.length} outgoingIDToRequestInfo=${outgoingIDToRequestInfo.size} outgoingRequestInfoPriorityQueue=${outgoingRequestInfoPriorityQueue.length}` +
+            ` expiredQuestionCacheKeys=${expiredQuestionCacheKeys.length} questionToResponse=${questionToResponse.size} questionToResponsePriorityQueue=${questionToResponsePriorityQueue.length}`);
 
-    }, 10000);
+    }, TIMER_INTERVAL_SECONDS * 1000);
 
     const serverSocket = dgram.createSocket('udp4');
     const remoteSocket = dgram.createSocket('udp4');
@@ -169,20 +210,16 @@ const main = () => {
             const questionCacheKey = `${question.name}_${question.type}_${question.class}`;
 
             const cacheObject = questionToResponse.get(questionCacheKey);
-            if (cacheObject) {
-                if (adjustTTL(cacheObject)) {
-                    const cachedResponse = cacheObject.decodedResponse;
-                    cachedResponse.id = decodedObject.id;
+            if (cacheObject && adjustTTL(cacheObject)) {
+                const cachedResponse = cacheObject.decodedResponse;
+                cachedResponse.id = decodedObject.id;
 
-                    const outgoingMessage = dnsPacket.encode(cachedResponse, null, null);
-                    serverSocket.send(outgoingMessage, 0, outgoingMessage.length, remoteInfo.port, remoteInfo.address);
+                const outgoingMessage = dnsPacket.encode(cachedResponse, null, null);
+                serverSocket.send(outgoingMessage, 0, outgoingMessage.length, remoteInfo.port, remoteInfo.address);
 
-                    cacheHit = true;
+                cacheHit = true;
 
-                    ++cacheHits;
-                } else {
-                    questionToResponse.delete(questionCacheKey);
-                }
+                ++cacheHits;
             }
         }
 
@@ -193,8 +230,11 @@ const main = () => {
 
             const requestTimeoutSeconds = getNowSeconds() + REQUEST_TIMEOUT_SECONDS;
 
-            outgoingIDToRequestInfo.set(outgoingID,
-                new OutgoingRequestInfo(remoteInfo, decodedObject.id, requestTimeoutSeconds));
+            const outgoingRequestInfo =
+                new OutgoingRequestInfo(outgoingID, remoteInfo, decodedObject.id, requestTimeoutSeconds);
+
+            outgoingRequestInfoPriorityQueue.push(outgoingRequestInfo);
+            outgoingIDToRequestInfo.set(outgoingID, outgoingRequestInfo);
 
             decodedObject.id = outgoingID;
             const outgoingMessage = dnsPacket.encode(decodedObject, null, null);
@@ -233,8 +273,9 @@ const main = () => {
                 const expirationTimeSeconds = nowSeconds + minTTLSeconds;
 
                 const cacheObject = new CacheObject(
-                    decodedObject, nowSeconds, expirationTimeSeconds);
+                    questionCacheKey, decodedObject, nowSeconds, expirationTimeSeconds);
 
+                questionToResponsePriorityQueue.push(cacheObject);
                 questionToResponse.set(questionCacheKey, cacheObject);
             }
         }

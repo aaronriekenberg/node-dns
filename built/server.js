@@ -1,10 +1,21 @@
 #!/usr/bin/env node
 "use strict";
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (Object.hasOwnProperty.call(mod, k)) result[k] = mod[k];
+    result["default"] = mod;
+    return result;
+};
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-const dnsPacket = require("dns-packet");
-const dgram = require("dgram");
-const process = require("process");
-const winston = require("winston");
+const dnsPacket = __importStar(require("dns-packet"));
+const dgram = __importStar(require("dgram"));
+const tinyqueue_1 = __importDefault(require("tinyqueue"));
+const process = __importStar(require("process"));
+const winston = __importStar(require("winston"));
 const stringify = JSON.stringify;
 const stringifyPretty = (object) => stringify(object, null, 2);
 const formatError = (err, includeStack = true) => {
@@ -26,10 +37,12 @@ const getRandomDNSID = () => {
 const SERVER_PORT = 10053;
 const REMOTE_IP = '8.8.8.8';
 const REMOTE_PORT = 53;
-const MIN_TTL_SECONDS = 300;
+const MIN_TTL_SECONDS = 10;
 const REQUEST_TIMEOUT_SECONDS = 10;
+const TIMER_INTERVAL_SECONDS = 10;
 class OutgoingRequestInfo {
-    constructor(clientRemoteInfo, clientRequestID, expirationTimeSeconds) {
+    constructor(outgoingRequestID, clientRemoteInfo, clientRequestID, expirationTimeSeconds) {
+        this.outgoingRequestID = outgoingRequestID;
         this.clientRemoteInfo = clientRemoteInfo;
         this.clientRequestID = clientRequestID;
         this.expirationTimeSeconds = expirationTimeSeconds;
@@ -37,16 +50,39 @@ class OutgoingRequestInfo {
     expired(nowSeconds) {
         return nowSeconds >= this.expirationTimeSeconds;
     }
+    compareByExpirationTime(other) {
+        if (this.expirationTimeSeconds < other.expirationTimeSeconds) {
+            return -1;
+        }
+        else if (this.expirationTimeSeconds === other.expirationTimeSeconds) {
+            return 0;
+        }
+        else {
+            return 1;
+        }
+    }
 }
 ;
 class CacheObject {
-    constructor(decodedResponse, cacheTimeSeconds, expirationTimeSeconds) {
+    constructor(questionCacheKey, decodedResponse, cacheTimeSeconds, expirationTimeSeconds) {
+        this.questionCacheKey = questionCacheKey;
         this.decodedResponse = decodedResponse;
         this.cacheTimeSeconds = cacheTimeSeconds;
         this.expirationTimeSeconds = expirationTimeSeconds;
     }
     expired(nowSeconds) {
         return nowSeconds >= this.expirationTimeSeconds;
+    }
+    compareByExpirationTime(other) {
+        if (this.expirationTimeSeconds < other.expirationTimeSeconds) {
+            return -1;
+        }
+        else if (this.expirationTimeSeconds === other.expirationTimeSeconds) {
+            return 0;
+        }
+        else {
+            return 1;
+        }
     }
 }
 ;
@@ -88,32 +124,49 @@ const adjustTTL = (cacheObject) => {
 const main = () => {
     logger.info('begin main');
     const outgoingIDToRequestInfo = new Map();
+    const outgoingRequestInfoPriorityQueue = new tinyqueue_1.default([], (a, b) => a.compareByExpirationTime(b));
     const questionToResponse = new Map();
+    const questionToResponsePriorityQueue = new tinyqueue_1.default([], (a, b) => a.compareByExpirationTime(b));
     let cacheHits = 0;
     let cacheMisses = 0;
     setInterval(() => {
         logger.info('begin timer pop');
         const nowSeconds = getNowSeconds();
+        let done;
+        done = false;
         const expiredOutgoingIDs = [];
-        for (const entry of outgoingIDToRequestInfo) {
-            if (entry[1].expired(nowSeconds)) {
-                expiredOutgoingIDs.push(entry[0]);
+        while ((outgoingRequestInfoPriorityQueue.length > 0) && (!done)) {
+            const outgoingRequestInfo = outgoingRequestInfoPriorityQueue.peek();
+            if (outgoingRequestInfo && outgoingRequestInfo.expired(nowSeconds)) {
+                outgoingRequestInfoPriorityQueue.pop();
+                expiredOutgoingIDs.push(outgoingRequestInfo.outgoingRequestID);
+            }
+            else {
+                done = true;
             }
         }
         expiredOutgoingIDs.forEach((id) => {
             outgoingIDToRequestInfo.delete(id);
         });
-        const expiredQuestions = [];
-        for (const entry of questionToResponse) {
-            if (entry[1].expired(nowSeconds)) {
-                expiredQuestions.push(entry[0]);
+        done = false;
+        const expiredQuestionCacheKeys = [];
+        while ((questionToResponsePriorityQueue.length > 0) && (!done)) {
+            const cacheObject = questionToResponsePriorityQueue.peek();
+            if (cacheObject && cacheObject.expired(nowSeconds)) {
+                questionToResponsePriorityQueue.pop();
+                expiredQuestionCacheKeys.push(cacheObject.questionCacheKey);
+            }
+            else {
+                done = true;
             }
         }
-        expiredQuestions.forEach((question) => {
-            questionToResponse.delete(question);
+        expiredQuestionCacheKeys.forEach((questionCacheKey) => {
+            questionToResponse.delete(questionCacheKey);
         });
-        logger.info(`end timer pop cacheHits=${cacheHits} cacheMisses=${cacheMisses} expiredOutgoingIDs=${expiredOutgoingIDs.length} expiredQuestions=${expiredQuestions.length} outgoingIDToRequestInfo=${outgoingIDToRequestInfo.size} questionToResponse=${questionToResponse.size}`);
-    }, 10000);
+        logger.info(`end timer pop cacheHits=${cacheHits} cacheMisses=${cacheMisses}` +
+            ` expiredOutgoingIDs=${expiredOutgoingIDs.length} outgoingIDToRequestInfo=${outgoingIDToRequestInfo.size} outgoingRequestInfoPriorityQueue=${outgoingRequestInfoPriorityQueue.length}` +
+            ` expiredQuestionCacheKeys=${expiredQuestionCacheKeys.length} questionToResponse=${questionToResponse.size} questionToResponsePriorityQueue=${questionToResponsePriorityQueue.length}`);
+    }, TIMER_INTERVAL_SECONDS * 1000);
     const serverSocket = dgram.createSocket('udp4');
     const remoteSocket = dgram.createSocket('udp4');
     serverSocket.on('error', (err) => {
@@ -132,25 +185,22 @@ const main = () => {
             const question = decodedObject.questions[0];
             const questionCacheKey = `${question.name}_${question.type}_${question.class}`;
             const cacheObject = questionToResponse.get(questionCacheKey);
-            if (cacheObject) {
-                if (adjustTTL(cacheObject)) {
-                    const cachedResponse = cacheObject.decodedResponse;
-                    cachedResponse.id = decodedObject.id;
-                    const outgoingMessage = dnsPacket.encode(cachedResponse, null, null);
-                    serverSocket.send(outgoingMessage, 0, outgoingMessage.length, remoteInfo.port, remoteInfo.address);
-                    cacheHit = true;
-                    ++cacheHits;
-                }
-                else {
-                    questionToResponse.delete(questionCacheKey);
-                }
+            if (cacheObject && adjustTTL(cacheObject)) {
+                const cachedResponse = cacheObject.decodedResponse;
+                cachedResponse.id = decodedObject.id;
+                const outgoingMessage = dnsPacket.encode(cachedResponse, null, null);
+                serverSocket.send(outgoingMessage, 0, outgoingMessage.length, remoteInfo.port, remoteInfo.address);
+                cacheHit = true;
+                ++cacheHits;
             }
         }
         if (!cacheHit) {
             ++cacheMisses;
             const outgoingID = getRandomDNSID();
             const requestTimeoutSeconds = getNowSeconds() + REQUEST_TIMEOUT_SECONDS;
-            outgoingIDToRequestInfo.set(outgoingID, new OutgoingRequestInfo(remoteInfo, decodedObject.id, requestTimeoutSeconds));
+            const outgoingRequestInfo = new OutgoingRequestInfo(outgoingID, remoteInfo, decodedObject.id, requestTimeoutSeconds);
+            outgoingRequestInfoPriorityQueue.push(outgoingRequestInfo);
+            outgoingIDToRequestInfo.set(outgoingID, outgoingRequestInfo);
             decodedObject.id = outgoingID;
             const outgoingMessage = dnsPacket.encode(decodedObject, null, null);
             remoteSocket.send(outgoingMessage, 0, outgoingMessage.length, REMOTE_PORT, REMOTE_IP);
@@ -177,7 +227,8 @@ const main = () => {
                 const questionCacheKey = `${question.name}_${question.type}_${question.class}`;
                 const nowSeconds = getNowSeconds();
                 const expirationTimeSeconds = nowSeconds + minTTLSeconds;
-                const cacheObject = new CacheObject(decodedObject, nowSeconds, expirationTimeSeconds);
+                const cacheObject = new CacheObject(questionCacheKey, decodedObject, nowSeconds, expirationTimeSeconds);
+                questionToResponsePriorityQueue.push(cacheObject);
                 questionToResponse.set(questionCacheKey, cacheObject);
             }
         }

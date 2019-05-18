@@ -2,11 +2,12 @@
   "compilerOptions": {
       "baseUrl": ".",
       "paths": { "*": ["types/*"] },
+    "esModuleInterop": true,
     "module": "CommonJS",
     "moduleResolution": "Node",
     "outDir": "./built",
     "strict": true,
-    "target": "ESNEXT"
+    "target": "ESNext"
   },
   "include": [
     "./src/**/*"
