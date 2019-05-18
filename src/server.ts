@@ -136,8 +136,8 @@ const main = () => {
                 expiredQuestions.push(entry[0]);
             }
         }
-        expiredOutgoingIDs.forEach((id) => {
-            outgoingIDToRequestInfo.delete(id);
+        expiredQuestions.forEach((question) => {
+            questionToResponse.delete(question);
         });
 
         logger.info(`end timer pop cacheHits=${cacheHits} cacheMisses=${cacheMisses} expiredOutgoingIDs=${expiredOutgoingIDs.length} expiredQuestions=${expiredQuestions.length} outgoingIDToRequestInfo=${outgoingIDToRequestInfo.size} questionToResponse=${questionToResponse.size}`);
