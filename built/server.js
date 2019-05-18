@@ -142,7 +142,6 @@ const main = () => {
                     ++cacheHits;
                 }
                 else {
-                    logger.info(`remove expired cache key ${questionCacheKey}`);
                     questionToResponse.delete(questionCacheKey);
                 }
             }
