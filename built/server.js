@@ -94,6 +94,7 @@ class DNSProxy {
         this.cacheHits = 0;
         this.cacheMisses = 0;
         this.serverSocket = dgram.createSocket('udp4');
+        this.serverSocketListening = false;
         this.remoteSocket = dgram.createSocket('udp4');
     }
     getRandomDNSID() {
@@ -169,75 +170,83 @@ class DNSProxy {
             ` expiredOutgoingIDs=${expiredOutgoingIDs} outgoingIDToRequestInfo=${this.outgoingIDToRequestInfo.size} outgoingRequestInfoPriorityQueue=${this.outgoingRequestInfoPriorityQueue.length}` +
             ` expiredQuestionCacheKeys=${expiredQuestionCacheKeys} questionToResponse=${this.questionToResponse.size} questionToResponsePriorityQueue=${this.questionToResponsePriorityQueue.length}`);
     }
+    handleServerSocketMessage(message, remoteInfo) {
+        const decodedObject = dnsPacket.decode(message, null);
+        // logger.info(`serverSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
+        let cacheHit = false;
+        if (decodedObject.questions) {
+            const questionCacheKey = stringify(decodedObject.questions).toLowerCase();
+            const cacheObject = this.questionToResponse.get(questionCacheKey);
+            if (cacheObject && this.adjustTTL(cacheObject)) {
+                const cachedResponse = cacheObject.decodedResponse;
+                cachedResponse.id = decodedObject.id;
+                const outgoingMessage = dnsPacket.encode(cachedResponse, null, null);
+                this.serverSocket.send(outgoingMessage, 0, outgoingMessage.length, remoteInfo.port, remoteInfo.address);
+                cacheHit = true;
+                ++this.cacheHits;
+            }
+        }
+        if (!cacheHit) {
+            ++this.cacheMisses;
+            const outgoingID = this.getRandomDNSID();
+            const requestTimeoutSeconds = getNowSeconds() + REQUEST_TIMEOUT_SECONDS;
+            const outgoingRequestInfo = new OutgoingRequestInfo(outgoingID, remoteInfo, decodedObject.id, requestTimeoutSeconds);
+            this.outgoingRequestInfoPriorityQueue.push(outgoingRequestInfo);
+            this.outgoingIDToRequestInfo.set(outgoingID, outgoingRequestInfo);
+            decodedObject.id = outgoingID;
+            const outgoingMessage = dnsPacket.encode(decodedObject, null, null);
+            this.remoteSocket.send(outgoingMessage, 0, outgoingMessage.length, REMOTE_PORT, REMOTE_IP);
+        }
+    }
+    handleRemoteSocketMessage(message, remoteInfo) {
+        const decodedObject = dnsPacket.decode(message, null);
+        // logger.info(`remoteSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
+        if ((decodedObject.rcode === 'NOERROR') &&
+            decodedObject.questions) {
+            const minTTLSeconds = this.getMinTTLSecondsForAnswers(decodedObject.answers);
+            if ((minTTLSeconds !== undefined) && (minTTLSeconds > 0)) {
+                const questionCacheKey = stringify(decodedObject.questions).toLowerCase();
+                const nowSeconds = getNowSeconds();
+                const expirationTimeSeconds = nowSeconds + minTTLSeconds;
+                const cacheObject = new CacheObject(questionCacheKey, decodedObject, nowSeconds, expirationTimeSeconds);
+                this.questionToResponsePriorityQueue.push(cacheObject);
+                this.questionToResponse.set(questionCacheKey, cacheObject);
+            }
+        }
+        const clientRequestInfo = this.outgoingIDToRequestInfo.get(decodedObject.id);
+        if (clientRequestInfo) {
+            this.outgoingIDToRequestInfo.delete(decodedObject.id);
+            decodedObject.id = clientRequestInfo.clientRequestID;
+            const outgoingMessage = dnsPacket.encode(decodedObject, null, null);
+            const clientRemoteInfo = clientRequestInfo.clientRemoteInfo;
+            this.serverSocket.send(outgoingMessage, 0, outgoingMessage.length, clientRemoteInfo.port, clientRemoteInfo.address);
+        }
+    }
     start() {
         logger.info('begin start');
         setInterval(() => this.timerPop(), TIMER_INTERVAL_SECONDS * 1000);
         this.serverSocket.on('error', (err) => {
             logger.warn(`serverSocketError ${formatError(err)}`);
-            process.exit(1);
+            if (!this.serverSocketListening) {
+                process.exit(1);
+            }
         });
         this.serverSocket.on('listening', () => {
+            this.serverSocketListening = true;
             logger.info(`serverSocket listening on ${stringify(this.serverSocket.address())}`);
         });
         this.serverSocket.on('message', (message, remoteInfo) => {
-            const decodedObject = dnsPacket.decode(message, null);
-            // logger.info(`serverSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
-            let cacheHit = false;
-            if (decodedObject.questions) {
-                const questionCacheKey = stringify(decodedObject.questions).toLowerCase();
-                const cacheObject = this.questionToResponse.get(questionCacheKey);
-                if (cacheObject && this.adjustTTL(cacheObject)) {
-                    const cachedResponse = cacheObject.decodedResponse;
-                    cachedResponse.id = decodedObject.id;
-                    const outgoingMessage = dnsPacket.encode(cachedResponse, null, null);
-                    this.serverSocket.send(outgoingMessage, 0, outgoingMessage.length, remoteInfo.port, remoteInfo.address);
-                    cacheHit = true;
-                    ++this.cacheHits;
-                }
-            }
-            if (!cacheHit) {
-                ++this.cacheMisses;
-                const outgoingID = this.getRandomDNSID();
-                const requestTimeoutSeconds = getNowSeconds() + REQUEST_TIMEOUT_SECONDS;
-                const outgoingRequestInfo = new OutgoingRequestInfo(outgoingID, remoteInfo, decodedObject.id, requestTimeoutSeconds);
-                this.outgoingRequestInfoPriorityQueue.push(outgoingRequestInfo);
-                this.outgoingIDToRequestInfo.set(outgoingID, outgoingRequestInfo);
-                decodedObject.id = outgoingID;
-                const outgoingMessage = dnsPacket.encode(decodedObject, null, null);
-                this.remoteSocket.send(outgoingMessage, 0, outgoingMessage.length, REMOTE_PORT, REMOTE_IP);
-            }
+            this.handleServerSocketMessage(message, remoteInfo);
         });
         this.remoteSocket.on('error', (err) => {
             logger.warn(`remoteSocket ${formatError(err)}`);
-            process.exit(1);
         });
         this.remoteSocket.on('listening', () => {
             logger.info(`remoteSocket listening on ${stringify(this.remoteSocket.address())}`);
             this.serverSocket.bind(SERVER_PORT);
         });
         this.remoteSocket.on('message', (message, remoteInfo) => {
-            const decodedObject = dnsPacket.decode(message, null);
-            // logger.info(`remoteSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
-            if ((decodedObject.rcode === 'NOERROR') &&
-                decodedObject.questions) {
-                const minTTLSeconds = this.getMinTTLSecondsForAnswers(decodedObject.answers);
-                if ((minTTLSeconds !== undefined) && (minTTLSeconds > 0)) {
-                    const questionCacheKey = stringify(decodedObject.questions).toLowerCase();
-                    const nowSeconds = getNowSeconds();
-                    const expirationTimeSeconds = nowSeconds + minTTLSeconds;
-                    const cacheObject = new CacheObject(questionCacheKey, decodedObject, nowSeconds, expirationTimeSeconds);
-                    this.questionToResponsePriorityQueue.push(cacheObject);
-                    this.questionToResponse.set(questionCacheKey, cacheObject);
-                }
-            }
-            const clientRequestInfo = this.outgoingIDToRequestInfo.get(decodedObject.id);
-            if (clientRequestInfo) {
-                this.outgoingIDToRequestInfo.delete(decodedObject.id);
-                decodedObject.id = clientRequestInfo.clientRequestID;
-                const outgoingMessage = dnsPacket.encode(decodedObject, null, null);
-                const clientRemoteInfo = clientRequestInfo.clientRemoteInfo;
-                this.serverSocket.send(outgoingMessage, 0, outgoingMessage.length, clientRemoteInfo.port, clientRemoteInfo.address);
-            }
+            this.handleRemoteSocketMessage(message, remoteInfo);
         });
         this.remoteSocket.bind();
     }
