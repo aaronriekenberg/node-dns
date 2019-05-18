@@ -111,7 +111,6 @@ class DNSProxy {
         return getRandomInt(1, 65534);
     }
 
-
     private getMinTTLSecondsForAnswers(answers: any): number | undefined {
         let minTTL: number | undefined;
         (answers || []).forEach((answer: any) => {
