@@ -136,22 +136,20 @@ class DNSProxy {
         const nowSeconds = getNowSeconds();
         let done;
         done = false;
-        const expiredOutgoingIDs = [];
+        let expiredOutgoingIDs = 0;
         while ((this.outgoingRequestInfoPriorityQueue.length > 0) && (!done)) {
             const outgoingRequestInfo = this.outgoingRequestInfoPriorityQueue.peek();
             if (outgoingRequestInfo && outgoingRequestInfo.expired(nowSeconds)) {
                 this.outgoingRequestInfoPriorityQueue.pop();
-                expiredOutgoingIDs.push(outgoingRequestInfo.outgoingRequestID);
+                this.outgoingIDToRequestInfo.delete(outgoingRequestInfo.outgoingRequestID);
+                ++expiredOutgoingIDs;
             }
             else {
                 done = true;
             }
         }
-        expiredOutgoingIDs.forEach((id) => {
-            this.outgoingIDToRequestInfo.delete(id);
-        });
         done = false;
-        const expiredQuestionCacheKeys = [];
+        let expiredQuestionCacheKeys = 0;
         while ((this.questionToResponsePriorityQueue.length > 0) && (!done)) {
             const queueCacheObject = this.questionToResponsePriorityQueue.peek();
             if (queueCacheObject && queueCacheObject.expired(nowSeconds)) {
@@ -159,19 +157,17 @@ class DNSProxy {
                 const mapCacheObject = this.questionToResponse.get(queueCacheObject.questionCacheKey);
                 // validate expired cache object has not been re-added to map
                 if (mapCacheObject && mapCacheObject.expired(nowSeconds)) {
-                    expiredQuestionCacheKeys.push(mapCacheObject.questionCacheKey);
+                    this.questionToResponse.delete(mapCacheObject.questionCacheKey);
+                    ++expiredQuestionCacheKeys;
                 }
             }
             else {
                 done = true;
             }
         }
-        expiredQuestionCacheKeys.forEach((questionCacheKey) => {
-            this.questionToResponse.delete(questionCacheKey);
-        });
         logger.info(`end timer pop cacheHits=${this.cacheHits} cacheMisses=${this.cacheMisses}` +
-            ` expiredOutgoingIDs=${expiredOutgoingIDs.length} outgoingIDToRequestInfo=${this.outgoingIDToRequestInfo.size} outgoingRequestInfoPriorityQueue=${this.outgoingRequestInfoPriorityQueue.length}` +
-            ` expiredQuestionCacheKeys=${expiredQuestionCacheKeys.length} questionToResponse=${this.questionToResponse.size} questionToResponsePriorityQueue=${this.questionToResponsePriorityQueue.length}`);
+            ` expiredOutgoingIDs=${expiredOutgoingIDs} outgoingIDToRequestInfo=${this.outgoingIDToRequestInfo.size} outgoingRequestInfoPriorityQueue=${this.outgoingRequestInfoPriorityQueue.length}` +
+            ` expiredQuestionCacheKeys=${expiredQuestionCacheKeys} questionToResponse=${this.questionToResponse.size} questionToResponsePriorityQueue=${this.questionToResponsePriorityQueue.length}`);
     }
     start() {
         logger.info('begin start');
