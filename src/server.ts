@@ -208,7 +208,7 @@ class DNSProxy {
 
             if (decodedObject.questions) {
 
-                const questionCacheKey = stringify(decodedObject.questions);
+                const questionCacheKey = stringify(decodedObject.questions).toLowerCase();
 
                 const cacheObject = this.questionToResponse.get(questionCacheKey);
                 if (cacheObject && this.adjustTTL(cacheObject)) {
@@ -266,7 +266,7 @@ class DNSProxy {
 
                 if ((minTTLSeconds !== undefined) && (minTTLSeconds > 0)) {
 
-                    const questionCacheKey = stringify(decodedObject.questions);
+                    const questionCacheKey = stringify(decodedObject.questions).toLowerCase();
 
                     const nowSeconds = getNowSeconds();
                     const expirationTimeSeconds = nowSeconds + minTTLSeconds;

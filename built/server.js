@@ -184,7 +184,7 @@ class DNSProxy {
             // logger.info(`serverSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
             let cacheHit = false;
             if (decodedObject.questions) {
-                const questionCacheKey = stringify(decodedObject.questions);
+                const questionCacheKey = stringify(decodedObject.questions).toLowerCase();
                 const cacheObject = this.questionToResponse.get(questionCacheKey);
                 if (cacheObject && this.adjustTTL(cacheObject)) {
                     const cachedResponse = cacheObject.decodedResponse;
@@ -222,7 +222,7 @@ class DNSProxy {
                 decodedObject.questions) {
                 const minTTLSeconds = this.getMinTTLSecondsForAnswers(decodedObject.answers);
                 if ((minTTLSeconds !== undefined) && (minTTLSeconds > 0)) {
-                    const questionCacheKey = stringify(decodedObject.questions);
+                    const questionCacheKey = stringify(decodedObject.questions).toLowerCase();
                     const nowSeconds = getNowSeconds();
                     const expirationTimeSeconds = nowSeconds + minTTLSeconds;
                     const cacheObject = new CacheObject(questionCacheKey, decodedObject, nowSeconds, expirationTimeSeconds);
