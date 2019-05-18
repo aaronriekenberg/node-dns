@@ -180,8 +180,7 @@ const main = () => {
         const decodedObject = dnsPacket.decode(message, null);
         let cacheHit = false;
         if (decodedObject.questions &&
-            (decodedObject.questions.length === 1) &&
-            (decodedObject.questions[0].type === 'A')) {
+            (decodedObject.questions.length === 1)) {
             const question = decodedObject.questions[0];
             const questionCacheKey = `${question.name}_${question.type}_${question.class}`;
             const cacheObject = questionToResponse.get(questionCacheKey);
@@ -219,8 +218,7 @@ const main = () => {
         // logger.info(`remoteSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
         if ((decodedObject.rcode === 'NOERROR') &&
             decodedObject.questions &&
-            (decodedObject.questions.length === 1) &&
-            (decodedObject.questions[0].type === 'A')) {
+            (decodedObject.questions.length === 1)) {
             const minTTLSeconds = getMinTTLSecondsForAnswers(decodedObject.answers);
             if ((minTTLSeconds !== undefined) && (minTTLSeconds > 0)) {
                 const question = decodedObject.questions[0];

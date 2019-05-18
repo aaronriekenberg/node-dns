@@ -203,8 +203,7 @@ const main = () => {
         let cacheHit = false;
 
         if (decodedObject.questions &&
-            (decodedObject.questions.length === 1) &&
-            (decodedObject.questions[0].type === 'A')) {
+            (decodedObject.questions.length === 1)) {
 
             const question = decodedObject.questions[0];
             const questionCacheKey = `${question.name}_${question.type}_${question.class}`;
@@ -260,8 +259,7 @@ const main = () => {
 
         if ((decodedObject.rcode === 'NOERROR') &&
             decodedObject.questions &&
-            (decodedObject.questions.length === 1) &&
-            (decodedObject.questions[0].type === 'A')) {
+            (decodedObject.questions.length === 1)) {
 
             const minTTLSeconds = getMinTTLSecondsForAnswers(decodedObject.answers);
 
