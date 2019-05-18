@@ -181,11 +181,10 @@ class DNSProxy {
         });
         this.serverSocket.on('message', (message, remoteInfo) => {
             const decodedObject = dnsPacket.decode(message, null);
+            // logger.info(`serverSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
             let cacheHit = false;
-            if (decodedObject.questions &&
-                (decodedObject.questions.length === 1)) {
-                const question = decodedObject.questions[0];
-                const questionCacheKey = `${question.name}_${question.type}_${question.class}`;
+            if (decodedObject.questions) {
+                const questionCacheKey = stringify(decodedObject.questions);
                 const cacheObject = this.questionToResponse.get(questionCacheKey);
                 if (cacheObject && this.adjustTTL(cacheObject)) {
                     const cachedResponse = cacheObject.decodedResponse;
@@ -220,12 +219,10 @@ class DNSProxy {
             const decodedObject = dnsPacket.decode(message, null);
             // logger.info(`remoteSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
             if ((decodedObject.rcode === 'NOERROR') &&
-                decodedObject.questions &&
-                (decodedObject.questions.length === 1)) {
+                decodedObject.questions) {
                 const minTTLSeconds = this.getMinTTLSecondsForAnswers(decodedObject.answers);
                 if ((minTTLSeconds !== undefined) && (minTTLSeconds > 0)) {
-                    const question = decodedObject.questions[0];
-                    const questionCacheKey = `${question.name}_${question.type}_${question.class}`;
+                    const questionCacheKey = stringify(decodedObject.questions);
                     const nowSeconds = getNowSeconds();
                     const expirationTimeSeconds = nowSeconds + minTTLSeconds;
                     const cacheObject = new CacheObject(questionCacheKey, decodedObject, nowSeconds, expirationTimeSeconds);
