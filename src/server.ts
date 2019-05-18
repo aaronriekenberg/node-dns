@@ -101,9 +101,6 @@ class DNSProxy {
     private cacheHits: number = 0;
     private cacheMisses: number = 0;
 
-    private lastMissKeys: string[] = [];
-    private lastInsertKeys: string[] = [];
-
     private readonly serverSocket = dgram.createSocket('udp4');
     private serverSocketListening = false;
     private readonly remoteSocket = dgram.createSocket('udp4');
@@ -188,10 +185,6 @@ class DNSProxy {
         logger.info(`end timer pop cacheHits=${this.cacheHits} cacheMisses=${this.cacheMisses}` +
             ` expiredOutgoingIDs=${expiredOutgoingIDs} outgoingIDToRequestInfo=${this.outgoingIDToRequestInfo.size} outgoingRequestInfoPriorityQueue=${this.outgoingRequestInfoPriorityQueue.length}` +
             ` expiredQuestionCacheKeys=${expiredQuestionCacheKeys} questionToResponse=${this.questionToResponse.size} questionToResponsePriorityQueue=${this.questionToResponsePriorityQueue.length}`);
-        logger.info(`lastMissKeys = ${this.lastMissKeys}`);
-        this.lastMissKeys = [];
-        logger.info(`lastInsertKeys = ${this.lastInsertKeys}`);
-        this.lastInsertKeys = [];
     }
 
     private handleServerSocketMessage(message: Buffer, remoteInfo: dgram.RemoteInfo) {
@@ -215,11 +208,6 @@ class DNSProxy {
                 cacheHit = true;
 
                 ++this.cacheHits;
-            } else {
-                this.lastMissKeys.push(questionCacheKey);
-                while (this.lastMissKeys.length > 10) {
-                    this.lastMissKeys.shift();
-                }
             }
         }
 
@@ -264,11 +252,6 @@ class DNSProxy {
 
                 this.questionToResponsePriorityQueue.push(cacheObject);
                 this.questionToResponse.set(questionCacheKey, cacheObject);
-
-                this.lastInsertKeys.push(questionCacheKey);
-                while (this.lastInsertKeys.length > 10) {
-                    this.lastInsertKeys.shift();
-                }
             }
         }
 
