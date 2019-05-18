@@ -153,10 +153,14 @@ class DNSProxy {
         done = false;
         const expiredQuestionCacheKeys = [];
         while ((this.questionToResponsePriorityQueue.length > 0) && (!done)) {
-            const cacheObject = this.questionToResponsePriorityQueue.peek();
-            if (cacheObject && cacheObject.expired(nowSeconds)) {
+            const queueCacheObject = this.questionToResponsePriorityQueue.peek();
+            if (queueCacheObject && queueCacheObject.expired(nowSeconds)) {
                 this.questionToResponsePriorityQueue.pop();
-                expiredQuestionCacheKeys.push(cacheObject.questionCacheKey);
+                const mapCacheObject = this.questionToResponse.get(queueCacheObject.questionCacheKey);
+                // validate expired cache object has not been re-added to map
+                if (mapCacheObject && mapCacheObject.expired(nowSeconds)) {
+                    expiredQuestionCacheKeys.push(mapCacheObject.questionCacheKey);
+                }
             }
             else {
                 done = true;
