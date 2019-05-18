@@ -27,7 +27,7 @@ const SERVER_PORT = 10053;
 const REMOTE_IP = '8.8.8.8';
 const REMOTE_PORT = 53;
 
-const MIN_TTL_SECONDS = 10;
+const MIN_TTL_SECONDS = 300;
 const REQUEST_TIMEOUT_SECONDS = 10;
 
 const TIMER_INTERVAL_SECONDS = 10;
@@ -90,6 +90,17 @@ const getNowSeconds = (): number => {
 
 class DNSProxy {
 
+    private static originalTTLSymbol = Symbol('originalTTL');
+
+    private outgoingIDToRequestInfo = new Map<number, OutgoingRequestInfo>();
+    private outgoingRequestInfoPriorityQueue = new TinyQueue<OutgoingRequestInfo>([], (a: OutgoingRequestInfo, b: OutgoingRequestInfo) => a.compareByExpirationTime(b));
+
+    private questionToResponse = new Map<string, CacheObject>();
+    private questionToResponsePriorityQueue = new TinyQueue<CacheObject>([], (a: CacheObject, b: CacheObject) => a.compareByExpirationTime(b));
+
+    private cacheHits: number = 0;
+    private cacheMisses: number = 0;
+
     private getRandomDNSID(): number {
         const getRandomInt = (min: number, max: number): number => {
             return Math.floor(Math.random() * (max - min + 1)) + min
@@ -97,7 +108,6 @@ class DNSProxy {
         return getRandomInt(1, 65534);
     }
 
-    private static originalTTLSymbol = Symbol('originalTTL');
 
     private getMinTTLSecondsForAnswers(answers: any): number | undefined {
         let minTTL: number | undefined;
@@ -136,14 +146,6 @@ class DNSProxy {
     start() {
         logger.info('begin start');
 
-        const outgoingIDToRequestInfo = new Map<number, OutgoingRequestInfo>();
-        const outgoingRequestInfoPriorityQueue = new TinyQueue<OutgoingRequestInfo>([], (a: OutgoingRequestInfo, b: OutgoingRequestInfo) => a.compareByExpirationTime(b));
-
-        const questionToResponse = new Map<string, CacheObject>();
-        const questionToResponsePriorityQueue = new TinyQueue<CacheObject>([], (a: CacheObject, b: CacheObject) => a.compareByExpirationTime(b));
-
-        let cacheHits = 0;
-        let cacheMisses = 0;
 
         setInterval(() => {
             logger.info('begin timer pop');
@@ -153,37 +155,37 @@ class DNSProxy {
 
             done = false;
             const expiredOutgoingIDs: number[] = [];
-            while ((outgoingRequestInfoPriorityQueue.length > 0) && (!done)) {
-                const outgoingRequestInfo = outgoingRequestInfoPriorityQueue.peek();
+            while ((this.outgoingRequestInfoPriorityQueue.length > 0) && (!done)) {
+                const outgoingRequestInfo = this.outgoingRequestInfoPriorityQueue.peek();
                 if (outgoingRequestInfo && outgoingRequestInfo.expired(nowSeconds)) {
-                    outgoingRequestInfoPriorityQueue.pop();
+                    this.outgoingRequestInfoPriorityQueue.pop();
                     expiredOutgoingIDs.push(outgoingRequestInfo.outgoingRequestID);
                 } else {
                     done = true;
                 }
             }
             expiredOutgoingIDs.forEach((id) => {
-                outgoingIDToRequestInfo.delete(id);
+                this.outgoingIDToRequestInfo.delete(id);
             });
 
             done = false;
             const expiredQuestionCacheKeys: string[] = [];
-            while ((questionToResponsePriorityQueue.length > 0) && (!done)) {
-                const cacheObject = questionToResponsePriorityQueue.peek();
+            while ((this.questionToResponsePriorityQueue.length > 0) && (!done)) {
+                const cacheObject = this.questionToResponsePriorityQueue.peek();
                 if (cacheObject && cacheObject.expired(nowSeconds)) {
-                    questionToResponsePriorityQueue.pop();
+                    this.questionToResponsePriorityQueue.pop();
                     expiredQuestionCacheKeys.push(cacheObject.questionCacheKey);
                 } else {
                     done = true;
                 }
             }
             expiredQuestionCacheKeys.forEach((questionCacheKey) => {
-                questionToResponse.delete(questionCacheKey);
+                this.questionToResponse.delete(questionCacheKey);
             });
 
-            logger.info(`end timer pop cacheHits=${cacheHits} cacheMisses=${cacheMisses}` +
-                ` expiredOutgoingIDs=${expiredOutgoingIDs.length} outgoingIDToRequestInfo=${outgoingIDToRequestInfo.size} outgoingRequestInfoPriorityQueue=${outgoingRequestInfoPriorityQueue.length}` +
-                ` expiredQuestionCacheKeys=${expiredQuestionCacheKeys.length} questionToResponse=${questionToResponse.size} questionToResponsePriorityQueue=${questionToResponsePriorityQueue.length}`);
+            logger.info(`end timer pop cacheHits=${this.cacheHits} cacheMisses=${this.cacheMisses}` +
+                ` expiredOutgoingIDs=${expiredOutgoingIDs.length} outgoingIDToRequestInfo=${this.outgoingIDToRequestInfo.size} outgoingRequestInfoPriorityQueue=${this.outgoingRequestInfoPriorityQueue.length}` +
+                ` expiredQuestionCacheKeys=${expiredQuestionCacheKeys.length} questionToResponse=${this.questionToResponse.size} questionToResponsePriorityQueue=${this.questionToResponsePriorityQueue.length}`);
 
         }, TIMER_INTERVAL_SECONDS * 1000);
 
@@ -210,7 +212,7 @@ class DNSProxy {
                 const question = decodedObject.questions[0];
                 const questionCacheKey = `${question.name}_${question.type}_${question.class}`;
 
-                const cacheObject = questionToResponse.get(questionCacheKey);
+                const cacheObject = this.questionToResponse.get(questionCacheKey);
                 if (cacheObject && this.adjustTTL(cacheObject)) {
                     const cachedResponse = cacheObject.decodedResponse;
                     cachedResponse.id = decodedObject.id;
@@ -220,12 +222,12 @@ class DNSProxy {
 
                     cacheHit = true;
 
-                    ++cacheHits;
+                    ++this.cacheHits;
                 }
             }
 
             if (!cacheHit) {
-                ++cacheMisses;
+                ++this.cacheMisses;
 
                 const outgoingID = this.getRandomDNSID();
 
@@ -234,8 +236,8 @@ class DNSProxy {
                 const outgoingRequestInfo =
                     new OutgoingRequestInfo(outgoingID, remoteInfo, decodedObject.id, requestTimeoutSeconds);
 
-                outgoingRequestInfoPriorityQueue.push(outgoingRequestInfo);
-                outgoingIDToRequestInfo.set(outgoingID, outgoingRequestInfo);
+                this.outgoingRequestInfoPriorityQueue.push(outgoingRequestInfo);
+                this.outgoingIDToRequestInfo.set(outgoingID, outgoingRequestInfo);
 
                 decodedObject.id = outgoingID;
                 const outgoingMessage = dnsPacket.encode(decodedObject, null, null);
@@ -275,14 +277,14 @@ class DNSProxy {
                     const cacheObject = new CacheObject(
                         questionCacheKey, decodedObject, nowSeconds, expirationTimeSeconds);
 
-                    questionToResponsePriorityQueue.push(cacheObject);
-                    questionToResponse.set(questionCacheKey, cacheObject);
+                    this.questionToResponsePriorityQueue.push(cacheObject);
+                    this.questionToResponse.set(questionCacheKey, cacheObject);
                 }
             }
 
-            const clientRequestInfo = outgoingIDToRequestInfo.get(decodedObject.id);
+            const clientRequestInfo = this.outgoingIDToRequestInfo.get(decodedObject.id);
             if (clientRequestInfo) {
-                outgoingIDToRequestInfo.delete(decodedObject.id);
+                this.outgoingIDToRequestInfo.delete(decodedObject.id);
 
                 decodedObject.id = clientRequestInfo.clientRequestID;
                 const outgoingMessage = dnsPacket.encode(decodedObject, null, null);
