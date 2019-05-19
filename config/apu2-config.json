@@ -9,17 +9,7 @@
     "fixedResponses": [
         {
             "type": "response",
-            "flags": 256,
-            "flag_qr": true,
-            "opcode": "QUERY",
-            "flag_aa": false,
-            "flag_tc": false,
-            "flag_rd": true,
-            "flag_ra": true,
-            "flag_z": false,
-            "flag_ad": false,
-            "flag_cd": false,
-            "rcode": "NOERROR",
+            "flags": 384,
             "questions": [
                 {
                     "name": "apu2.domain",
@@ -42,17 +32,7 @@
         },
         {
             "type": "response",
-            "flags": 256,
-            "flag_qr": true,
-            "opcode": "QUERY",
-            "flag_aa": false,
-            "flag_tc": false,
-            "flag_rd": true,
-            "flag_ra": true,
-            "flag_z": false,
-            "flag_ad": false,
-            "flag_cd": false,
-            "rcode": "NOERROR",
+            "flags": 384,
             "questions": [
                 {
                     "name": "raspberrypi.domain",

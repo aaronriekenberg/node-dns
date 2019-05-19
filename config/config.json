@@ -6,39 +6,5 @@
     "minTTLSeconds": 300,
     "requestTimeoutSeconds": 10,
     "timerIntervalSeconds": 10,
-    "fixedResponses": [
-        {
-            "type": "response",
-            "flags": 256,
-            "flag_qr": true,
-            "opcode": "QUERY",
-            "flag_aa": false,
-            "flag_tc": false,
-            "flag_rd": true,
-            "flag_ra": true,
-            "flag_z": false,
-            "flag_ad": false,
-            "flag_cd": false,
-            "rcode": "NOERROR",
-            "questions": [
-                {
-                    "name": "apu2.domain",
-                    "type": "A",
-                    "class": "IN"
-                }
-            ],
-            "answers": [
-                {
-                    "name": "apu2.domain",
-                    "type": "A",
-                    "ttl": 10,
-                    "class": "IN",
-                    "flush": false,
-                    "data": "192.168.1.1"
-                }
-            ],
-            "authorities": [],
-            "additionals": []
-        }
-    ]
+    "fixedResponses": []
 }
