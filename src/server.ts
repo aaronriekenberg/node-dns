@@ -67,11 +67,11 @@ class RemoteInfo {
 
     }
 
-    static createUDP(udpSocket: dgram.Socket, udpRemoteInfo: dgram.RemoteInfo) {
+    static createUDP(udpSocket: dgram.Socket, udpRemoteInfo: dgram.RemoteInfo): RemoteInfo {
         return new RemoteInfo(udpSocket, udpRemoteInfo, null);
     }
 
-    static createTCP(tcpSocket: net.Socket) {
+    static createTCP(tcpSocket: net.Socket): RemoteInfo {
         return new RemoteInfo(null, null, tcpSocket);
     }
 
