@@ -2,6 +2,7 @@
 
 import * as dnsPacket from 'dns-packet';
 import * as dgram from 'dgram';
+import * as fs from 'fs'
 import TinyQueue from 'tinyqueue';
 import * as process from 'process';
 import * as winston from 'winston';
@@ -22,15 +23,37 @@ const logger = winston.createLogger({
     transports: [new winston.transports.Console()]
 });
 
-const SERVER_PORT = 10053;
+const UTF8 = 'utf8';
 
-const REMOTE_IP = '8.8.8.8';
-const REMOTE_PORT = 53;
+const asyncReadFile = async (filePath: string, encoding?: string) => {
+    let fileHandle: fs.promises.FileHandle | undefined;
+    try {
+        fileHandle = await fs.promises.open(filePath, 'r');
+        return await fileHandle.readFile({
+            encoding
+        });
+    } finally {
+        if (fileHandle) {
+            await fileHandle.close();
+        }
+    }
+};
 
-const MIN_TTL_SECONDS = 300;
-const REQUEST_TIMEOUT_SECONDS = 10;
+const getNowSeconds = (): number => {
+    const now = new Date();
+    now.setMilliseconds(0);
+    return now.getTime() / 1000.;
+};
 
-const TIMER_INTERVAL_SECONDS = 10;
+interface Configuration {
+    readonly serverAddress: string;
+    readonly serverPort: number;
+    readonly remoteAddress: string;
+    readonly remotePort: number;
+    readonly minTTLSeconds: number;
+    readonly requestTimeoutSeconds: number;
+    readonly timerIntervalSeconds: number;
+};
 
 class OutgoingRequestInfo {
 
@@ -82,12 +105,6 @@ class CacheObject {
     }
 };
 
-const getNowSeconds = (): number => {
-    const now = new Date();
-    now.setMilliseconds(0);
-    return now.getTime() / 1000.;
-};
-
 class DNSProxy {
 
     private static readonly originalTTLSymbol = Symbol('originalTTL');
@@ -105,6 +122,10 @@ class DNSProxy {
     private serverSocketListening = false;
     private readonly remoteSocket = dgram.createSocket('udp4');
 
+    constructor(private readonly configuration: Configuration) {
+
+    }
+
     private getRandomDNSID(): number {
         const getRandomInt = (min: number, max: number): number => {
             return Math.floor(Math.random() * (max - min + 1)) + min
@@ -115,8 +136,8 @@ class DNSProxy {
     private getMinTTLSecondsForAnswers(answers: any): number | undefined {
         let minTTL: number | undefined;
         (answers || []).forEach((answer: any) => {
-            if ((answer.ttl === undefined) || (answer.ttl === null) || (answer.ttl < MIN_TTL_SECONDS)) {
-                answer.ttl = MIN_TTL_SECONDS;
+            if ((answer.ttl === undefined) || (answer.ttl === null) || (answer.ttl < this.configuration.minTTLSeconds)) {
+                answer.ttl = this.configuration.minTTLSeconds;
             }
             answer[DNSProxy.originalTTLSymbol] = answer.ttl;
             if ((minTTL === undefined) || (answer.ttl < minTTL)) {
@@ -216,7 +237,7 @@ class DNSProxy {
 
             const outgoingID = this.getRandomDNSID();
 
-            const requestTimeoutSeconds = getNowSeconds() + REQUEST_TIMEOUT_SECONDS;
+            const requestTimeoutSeconds = getNowSeconds() + this.configuration.requestTimeoutSeconds;
 
             const outgoingRequestInfo =
                 new OutgoingRequestInfo(outgoingID, remoteInfo, decodedObject.id, requestTimeoutSeconds);
@@ -227,7 +248,7 @@ class DNSProxy {
             decodedObject.id = outgoingID;
             const outgoingMessage = dnsPacket.encode(decodedObject, null, null);
 
-            this.remoteSocket.send(outgoingMessage, 0, outgoingMessage.length, REMOTE_PORT, REMOTE_IP);
+            this.remoteSocket.send(outgoingMessage, 0, outgoingMessage.length, this.configuration.remotePort, this.configuration.remoteAddress);
         }
     }
 
@@ -271,12 +292,12 @@ class DNSProxy {
     start() {
         logger.info('begin start');
 
-        setInterval(() => this.timerPop(), TIMER_INTERVAL_SECONDS * 1000);
+        setInterval(() => this.timerPop(), this.configuration.timerIntervalSeconds * 1000);
 
         this.serverSocket.on('error', (err) => {
             logger.warn(`serverSocket error ${formatError(err)}`);
             if (!this.serverSocketListening) {
-                process.exit(1);
+                throw new Error('server socket bind error');
             }
         });
 
@@ -296,7 +317,7 @@ class DNSProxy {
         this.remoteSocket.on('listening', () => {
             logger.info(`remoteSocket listening on ${stringify(this.remoteSocket.address())}`);
 
-            this.serverSocket.bind(SERVER_PORT);
+            this.serverSocket.bind(this.configuration.serverPort, this.configuration.serverAddress);
         });
 
         this.remoteSocket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
@@ -308,8 +329,29 @@ class DNSProxy {
 
 };
 
-const main = () => {
-    new DNSProxy().start();
+const readConfiguration = async (configFilePath: string) => {
+    logger.info(`readConfiguration '${configFilePath}'`);
+
+    const fileContent = await asyncReadFile(configFilePath, UTF8);
+
+    const configuration = JSON.parse(fileContent.toString()) as Configuration;
+
+    logger.info(`configuration = ${stringifyPretty(configuration)}`);
+
+    return configuration;
 };
 
-main();
+const main = async () => {
+    if (process.argv.length !== 3) {
+        throw new Error('config json path required as command line argument');
+    }
+
+    const configuration = await readConfiguration(process.argv[2]);
+
+    new DNSProxy(configuration).start();
+};
+
+main().catch((err) => {
+    logger.error(`main error err = ${formatError(err)}`);
+    process.exit(1);
+});
