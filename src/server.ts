@@ -2,7 +2,8 @@
 
 import * as dnsPacket from 'dns-packet';
 import * as dgram from 'dgram';
-import * as fs from 'fs'
+import * as fs from 'fs';
+import * as net from 'net';
 import TinyQueue from 'tinyqueue';
 import * as process from 'process';
 import * as winston from 'winston';
@@ -52,15 +53,51 @@ interface Configuration {
     readonly remotePort: number;
     readonly minTTLSeconds: number;
     readonly requestTimeoutSeconds: number;
+    readonly tcpConnectionTimeoutSeconds: number;
     readonly timerIntervalSeconds: number;
     readonly fixedResponses?: any[];
+};
+
+class RemoteInfo {
+
+    private constructor(
+        readonly udpSocket: dgram.Socket | null,
+        readonly udpRemoteInfo: dgram.RemoteInfo | null,
+        readonly tcpSocket: net.Socket | null) {
+
+    }
+
+    static createUDP(udpSocket: dgram.Socket, udpRemoteInfo: dgram.RemoteInfo) {
+        return new RemoteInfo(udpSocket, udpRemoteInfo, null);
+    }
+
+    static createTCP(tcpSocket: net.Socket) {
+        return new RemoteInfo(null, null, tcpSocket);
+    }
+
+    writeResponse(dnsResponse: any) {
+        if (this.udpSocket && this.udpRemoteInfo) {
+            const outgoingMessage = dnsPacket.encode(dnsResponse, null, null);
+            this.udpSocket.send(outgoingMessage, 0, outgoingMessage.length, this.udpRemoteInfo.port, this.udpRemoteInfo.address);
+        }
+
+        else if (this.tcpSocket) {
+            if (!this.tcpSocket.destroyed) {
+                this.tcpSocket.write(dnsPacket.streamEncode(dnsResponse));
+            }
+        }
+    }
+
+    get isUDP(): boolean {
+        return ((this.udpSocket !== null) && (this.udpRemoteInfo !== null));
+    }
 };
 
 class OutgoingRequestInfo {
 
     constructor(
         readonly outgoingRequestID: number,
-        readonly clientRemoteInfo: dgram.RemoteInfo,
+        readonly clientRemoteInfo: RemoteInfo,
         readonly clientRequestID: number,
         readonly expirationTimeSeconds: number) {
 
@@ -106,6 +143,108 @@ class CacheObject {
     }
 };
 
+class TCPRemoteServerConnection {
+
+    private readonly socketTimeoutMilliseconds: number;
+
+    private readonly remoteAddress: string;
+
+    private readonly remotePort: number;
+
+    private socket: net.Socket | null = null;
+
+    private connecting: boolean = false;
+
+    private requestBuffer: any[] = [];
+
+    constructor(configuration: Configuration, readonly messageCallback: (decodedMessage: any) => void) {
+        this.socketTimeoutMilliseconds = configuration.tcpConnectionTimeoutSeconds * 1000;
+        this.remoteAddress = configuration.remoteAddress;
+        this.remotePort = configuration.remotePort;
+    }
+
+    writeRequest(dnsRequest: any) {
+        this.createSocketIfNecessary();
+
+        if (this.connecting) {
+            this.requestBuffer.push(dnsRequest);
+        }
+
+        else if (this.socket) {
+            if (!this.socket.destroyed) {
+                this.socket.write(dnsPacket.streamEncode(dnsRequest));
+            }
+        }
+    }
+
+    private createSocketIfNecessary() {
+        if (!this.socket) {
+            const socket = new net.Socket();
+            this.socket = socket;
+
+            socket.on('error', (err) => {
+                logger.warn(`remote tcp client error ${formatError(err)}`);
+                socket.destroy();
+            });
+
+            socket.on('close', () => {
+                this.socket = null;
+                this.connecting = false;
+                this.requestBuffer = [];
+            });
+
+            let readingHeader = true;
+            let buffer = Buffer.of();
+            let bodyLength = 0;
+            socket.on('data', (data) => {
+                buffer = Buffer.concat([buffer, data]);
+
+                let done = false;
+                while (!done) {
+                    if (readingHeader) {
+                        if (buffer.byteLength >= 2) {
+                            bodyLength = buffer.readUInt16BE(0);
+                            readingHeader = false;
+                        } else {
+                            done = true;
+                        }
+                    } else {
+                        if (buffer.byteLength >= (2 + bodyLength)) {
+                            const decodedMessage = dnsPacket.streamDecode(buffer.slice(0, 2 + bodyLength));
+                            this.messageCallback(decodedMessage);
+                            buffer = buffer.slice(2 + bodyLength);
+                            readingHeader = true;
+                            bodyLength = 0;
+                        } else {
+                            done = true;
+                        }
+                    }
+                }
+            });
+
+            socket.on('timeout', () => {
+                socket.destroy();
+            });
+
+            socket.setTimeout(this.socketTimeoutMilliseconds);
+
+            socket.on('connect', () => {
+                this.connecting = false;
+                this.requestBuffer.forEach((bufferedRequest) => {
+                    if (!socket.destroyed) {
+                        socket.write(dnsPacket.streamEncode(bufferedRequest));
+                    }
+                });
+                this.requestBuffer = [];
+            });
+
+            socket.connect(this.remotePort, this.remoteAddress);
+            this.connecting = true;
+        }
+    }
+
+};
+
 class DNSProxy {
 
     private static readonly originalTTLSymbol = Symbol('originalTTL');
@@ -121,13 +260,20 @@ class DNSProxy {
     private fixedResponses: number = 0;
     private cacheHits: number = 0;
     private cacheMisses: number = 0;
+    private remoteUDPRequests: number = 0;
+    private remoteTCPRequests: number = 0;
 
-    private readonly serverSocket = dgram.createSocket('udp4');
-    private serverSocketListening = false;
-    private readonly remoteSocket = dgram.createSocket('udp4');
+    private readonly udpServerSocket = dgram.createSocket('udp4');
+    private readonly udpRemoteSocket = dgram.createSocket('udp4');
+
+    private readonly tcpServerSocket = net.createServer();
+
+    private readonly tcpRemoteServerConnection: TCPRemoteServerConnection;
 
     constructor(private readonly configuration: Configuration) {
-
+        this.tcpRemoteServerConnection = new TCPRemoteServerConnection(configuration, (decodedMessage) => {
+            this.handleRemoteSocketMessage(decodedMessage);
+        });
     }
 
     private getRandomDNSID(): number {
@@ -217,25 +363,24 @@ class DNSProxy {
 
         logger.info(`end timer pop cacheHits=${this.cacheHits} cacheMisses=${this.cacheMisses} fixedResponses=${this.fixedResponses}` +
             ` expiredOutgoingIDs=${expiredOutgoingIDs} outgoingIDToRequestInfo=${this.outgoingIDToRequestInfo.size} outgoingRequestInfoPriorityQueue=${this.outgoingRequestInfoPriorityQueue.length}` +
-            ` expiredQuestionCacheKeys=${expiredQuestionCacheKeys} questionToResponse=${this.questionToResponse.size} questionToResponsePriorityQueue=${this.questionToResponsePriorityQueue.length}`);
+            ` expiredQuestionCacheKeys=${expiredQuestionCacheKeys} questionToResponse=${this.questionToResponse.size} questionToResponsePriorityQueue=${this.questionToResponsePriorityQueue.length}` +
+            ` remoteUDPRequests=${this.remoteUDPRequests} remoteTCPRequests=${this.remoteTCPRequests}`);
     }
 
-    private handleServerSocketMessage(message: Buffer, remoteInfo: dgram.RemoteInfo) {
-        const decodedObject = dnsPacket.decode(message, null);
-        // logger.info(`serverSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
+    private handleServerSocketMessage(decodedRequestObject: any, clientRemoteInfo: RemoteInfo) {
+        // logger.info(`serverSocket message remoteInfo = ${stringifyPretty(clientRemoteInfo)}\ndecodedRequestObject = ${stringifyPretty(decodedRequestObject)}`);
 
         let responded = false;
 
-        if (decodedObject.questions) {
+        if (decodedRequestObject.questions) {
 
-            const questionCacheKey = stringify(decodedObject.questions).toLowerCase();
+            const questionCacheKey = stringify(decodedRequestObject.questions).toLowerCase();
 
             const fixedResponse = this.questionToFixedResponse.get(questionCacheKey);
             if (fixedResponse) {
-                fixedResponse.id = decodedObject.id;
+                fixedResponse.id = decodedRequestObject.id;
 
-                const outgoingMessage = dnsPacket.encode(fixedResponse, null, null);
-                this.serverSocket.send(outgoingMessage, 0, outgoingMessage.length, remoteInfo.port, remoteInfo.address);
+                clientRemoteInfo.writeResponse(fixedResponse);
 
                 responded = true;
 
@@ -246,10 +391,9 @@ class DNSProxy {
                 const cacheObject = this.questionToResponse.get(questionCacheKey);
                 if (cacheObject && this.adjustTTL(cacheObject)) {
                     const cachedResponse = cacheObject.decodedResponse;
-                    cachedResponse.id = decodedObject.id;
+                    cachedResponse.id = decodedRequestObject.id;
 
-                    const outgoingMessage = dnsPacket.encode(cachedResponse, null, null);
-                    this.serverSocket.send(outgoingMessage, 0, outgoingMessage.length, remoteInfo.port, remoteInfo.address);
+                    clientRemoteInfo.writeResponse(cachedResponse);
 
                     responded = true;
 
@@ -266,53 +410,156 @@ class DNSProxy {
             const requestTimeoutSeconds = getNowSeconds() + this.configuration.requestTimeoutSeconds;
 
             const outgoingRequestInfo =
-                new OutgoingRequestInfo(outgoingID, remoteInfo, decodedObject.id, requestTimeoutSeconds);
+                new OutgoingRequestInfo(outgoingID, clientRemoteInfo, decodedRequestObject.id, requestTimeoutSeconds);
 
             this.outgoingRequestInfoPriorityQueue.push(outgoingRequestInfo);
             this.outgoingIDToRequestInfo.set(outgoingID, outgoingRequestInfo);
 
-            decodedObject.id = outgoingID;
-            const outgoingMessage = dnsPacket.encode(decodedObject, null, null);
+            decodedRequestObject.id = outgoingID;
 
-            this.remoteSocket.send(outgoingMessage, 0, outgoingMessage.length, this.configuration.remotePort, this.configuration.remoteAddress);
+            if (clientRemoteInfo.isUDP) {
+                ++this.remoteUDPRequests;
+                const outgoingMessage = dnsPacket.encode(decodedRequestObject, null, null);
+                this.udpRemoteSocket.send(outgoingMessage, 0, outgoingMessage.length, this.configuration.remotePort, this.configuration.remoteAddress);
+            } else {
+                ++this.remoteTCPRequests;
+                this.tcpRemoteServerConnection.writeRequest(decodedRequestObject);
+            }
         }
     }
 
-    private handleRemoteSocketMessage(message: Buffer, remoteInfo: dgram.RemoteInfo) {
-        const decodedObject = dnsPacket.decode(message, null);
-        // logger.info(`remoteSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
+    private handleRemoteSocketMessage(decodedResponse: any) {
+        // logger.info(`remoteSocket message decodedResponse = ${stringifyPretty(decodedResponse)}`);
 
-        if ((decodedObject.rcode === 'NOERROR') &&
-            decodedObject.questions) {
+        if ((decodedResponse.rcode === 'NOERROR') &&
+            decodedResponse.questions) {
 
-            const minTTLSeconds = this.getMinTTLSecondsForAnswers(decodedObject.answers);
+            const minTTLSeconds = this.getMinTTLSecondsForAnswers(decodedResponse.answers);
 
             if ((minTTLSeconds !== undefined) && (minTTLSeconds > 0)) {
 
-                const questionCacheKey = stringify(decodedObject.questions).toLowerCase();
+                const questionCacheKey = stringify(decodedResponse.questions).toLowerCase();
 
                 const nowSeconds = getNowSeconds();
                 const expirationTimeSeconds = nowSeconds + minTTLSeconds;
 
                 const cacheObject = new CacheObject(
-                    questionCacheKey, decodedObject, nowSeconds, expirationTimeSeconds);
+                    questionCacheKey, decodedResponse, nowSeconds, expirationTimeSeconds);
 
                 this.questionToResponsePriorityQueue.push(cacheObject);
                 this.questionToResponse.set(questionCacheKey, cacheObject);
             }
         }
 
-        const clientRequestInfo = this.outgoingIDToRequestInfo.get(decodedObject.id);
+        const clientRequestInfo = this.outgoingIDToRequestInfo.get(decodedResponse.id);
         if (clientRequestInfo) {
-            this.outgoingIDToRequestInfo.delete(decodedObject.id);
+            this.outgoingIDToRequestInfo.delete(decodedResponse.id);
 
-            decodedObject.id = clientRequestInfo.clientRequestID;
-            const outgoingMessage = dnsPacket.encode(decodedObject, null, null);
+            decodedResponse.id = clientRequestInfo.clientRequestID;
 
             const clientRemoteInfo = clientRequestInfo.clientRemoteInfo;
 
-            this.serverSocket.send(outgoingMessage, 0, outgoingMessage.length, clientRemoteInfo.port, clientRemoteInfo.address);
+            clientRemoteInfo.writeResponse(decodedResponse);
         }
+    }
+
+    private setupSocketEvents() {
+
+        let udpServerSocketListening = false;
+        this.udpServerSocket.on('error', (err) => {
+            logger.warn(`udpServerSocket error ${formatError(err)}`);
+            if (!udpServerSocketListening) {
+                throw new Error('udp server socket bind error');
+            }
+        });
+
+        this.udpServerSocket.on('listening', () => {
+            udpServerSocketListening = true;
+            logger.info(`udpServerSocket listening on ${stringify(this.udpServerSocket.address())}`);
+        });
+
+        this.udpServerSocket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
+            const decodedMessage = dnsPacket.decode(message, null);
+            this.handleServerSocketMessage(decodedMessage, RemoteInfo.createUDP(this.udpServerSocket, remoteInfo));
+        });
+
+        this.udpRemoteSocket.on('error', (err) => {
+            logger.warn(`udpRemoteSocket error ${formatError(err)}`);
+        });
+
+        this.udpRemoteSocket.on('listening', () => {
+            logger.info(`udpRemoteSocket listening on ${stringify(this.udpRemoteSocket.address())}`);
+
+            this.udpServerSocket.bind(this.configuration.serverPort, this.configuration.serverAddress);
+        });
+
+        this.udpRemoteSocket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
+            this.handleRemoteSocketMessage(dnsPacket.decode(message, null));
+        });
+
+        this.udpRemoteSocket.bind();
+
+        let tcpServerSocketListening = false;
+        this.tcpServerSocket.on('error', (err) => {
+            logger.warn(`tcpServerSocket error ${formatError(err)}`);
+            if (!tcpServerSocketListening) {
+                throw new Error('tcp server socket listen error');
+            }
+        });
+
+        this.tcpServerSocket.on('listening', () => {
+            tcpServerSocketListening = true;
+            logger.info(`tcpServerSocket listening on ${stringify(this.tcpServerSocket.address())}`);
+        });
+
+        this.tcpServerSocket.on('connection', (connection) => {
+
+            connection.on('error', (err) => {
+                logger.warn(`tcp client error ${formatError(err)}`);
+                connection.destroy();
+            });
+
+            connection.on('close', () => {
+
+            });
+
+            let readingHeader = true;
+            let buffer = Buffer.of();
+            let bodyLength = 0;
+            connection.on('data', (data) => {
+                buffer = Buffer.concat([buffer, data]);
+
+                let done = false;
+                while (!done) {
+                    if (readingHeader) {
+                        if (buffer.byteLength >= 2) {
+                            bodyLength = buffer.readUInt16BE(0);
+                            readingHeader = false;
+                        } else {
+                            done = true;
+                        }
+                    } else {
+                        if (buffer.byteLength >= (2 + bodyLength)) {
+                            const decodedMessage = dnsPacket.streamDecode(buffer.slice(0, 2 + bodyLength));
+                            this.handleServerSocketMessage(decodedMessage, RemoteInfo.createTCP(connection));
+                            buffer = buffer.slice(2 + bodyLength);
+                            readingHeader = true;
+                            bodyLength = 0;
+                        } else {
+                            done = true;
+                        }
+                    }
+                }
+            });
+
+            connection.on('timeout', () => {
+                connection.destroy();
+            });
+
+            connection.setTimeout(this.configuration.tcpConnectionTimeoutSeconds * 1000);
+        });
+
+        this.tcpServerSocket.listen(this.configuration.serverPort, this.configuration.serverAddress);
     }
 
     start() {
@@ -320,39 +567,9 @@ class DNSProxy {
 
         this.buildFixedResponses();
 
+        this.setupSocketEvents();
+
         setInterval(() => this.timerPop(), this.configuration.timerIntervalSeconds * 1000);
-
-        this.serverSocket.on('error', (err) => {
-            logger.warn(`serverSocket error ${formatError(err)}`);
-            if (!this.serverSocketListening) {
-                throw new Error('server socket bind error');
-            }
-        });
-
-        this.serverSocket.on('listening', () => {
-            this.serverSocketListening = true;
-            logger.info(`serverSocket listening on ${stringify(this.serverSocket.address())}`);
-        });
-
-        this.serverSocket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
-            this.handleServerSocketMessage(message, remoteInfo);
-        });
-
-        this.remoteSocket.on('error', (err) => {
-            logger.warn(`remoteSocket error ${formatError(err)}`);
-        });
-
-        this.remoteSocket.on('listening', () => {
-            logger.info(`remoteSocket listening on ${stringify(this.remoteSocket.address())}`);
-
-            this.serverSocket.bind(this.configuration.serverPort, this.configuration.serverAddress);
-        });
-
-        this.remoteSocket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
-            this.handleRemoteSocketMessage(message, remoteInfo);
-        });
-
-        this.remoteSocket.bind();
     }
 
 };

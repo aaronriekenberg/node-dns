@@ -5,6 +5,31 @@
     "remotePort": 53,
     "minTTLSeconds": 300,
     "requestTimeoutSeconds": 10,
+    "tcpConnectionTimeoutSeconds": 5,
     "timerIntervalSeconds": 10,
-    "fixedResponses": []
+    "fixedResponses": [
+        {
+            "type": "response",
+            "flags": 384,
+            "questions": [
+                {
+                    "name": "apu2.domain",
+                    "type": "A",
+                    "class": "IN"
+                }
+            ],
+            "answers": [
+                {
+                    "name": "apu2.domain",
+                    "type": "A",
+                    "ttl": 10,
+                    "class": "IN",
+                    "flush": false,
+                    "data": "192.168.1.1"
+                }
+            ],
+            "authorities": [],
+            "additionals": []
+        }
+    ]
 }

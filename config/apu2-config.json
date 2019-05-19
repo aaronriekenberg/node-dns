@@ -5,6 +5,7 @@
     "remotePort": 53,
     "minTTLSeconds": 300,
     "requestTimeoutSeconds": 10,
+    "tcpConnectionTimeoutSeconds": 5,
     "timerIntervalSeconds": 10,
     "fixedResponses": [
         {
