@@ -53,6 +53,7 @@ interface Configuration {
     readonly minTTLSeconds: number;
     readonly requestTimeoutSeconds: number;
     readonly timerIntervalSeconds: number;
+    readonly fixedResponses?: any[];
 };
 
 class OutgoingRequestInfo {
@@ -112,9 +113,12 @@ class DNSProxy {
     private readonly outgoingIDToRequestInfo = new Map<number, OutgoingRequestInfo>();
     private readonly outgoingRequestInfoPriorityQueue = new TinyQueue<OutgoingRequestInfo>([], (a: OutgoingRequestInfo, b: OutgoingRequestInfo) => a.compareByExpirationTime(b));
 
+    private readonly questionToFixedResponse = new Map<string, any>();
+
     private readonly questionToResponse = new Map<string, CacheObject>();
     private readonly questionToResponsePriorityQueue = new TinyQueue<CacheObject>([], (a: CacheObject, b: CacheObject) => a.compareByExpirationTime(b));
 
+    private fixedResponses: number = 0;
     private cacheHits: number = 0;
     private cacheMisses: number = 0;
 
@@ -131,6 +135,14 @@ class DNSProxy {
             return Math.floor(Math.random() * (max - min + 1)) + min
         };
         return getRandomInt(1, 65534);
+    }
+
+    private buildFixedResponses() {
+        (this.configuration.fixedResponses || []).forEach((fixedResponse) => {
+            const questionCacheKey = stringify(fixedResponse.questions).toLowerCase();
+            this.questionToFixedResponse.set(questionCacheKey, fixedResponse);
+        });
+        logger.info(`questionToFixedResponse.size = ${this.questionToFixedResponse.size}`);
     }
 
     private getMinTTLSecondsForAnswers(answers: any): number | undefined {
@@ -203,7 +215,7 @@ class DNSProxy {
             }
         }
 
-        logger.info(`end timer pop cacheHits=${this.cacheHits} cacheMisses=${this.cacheMisses}` +
+        logger.info(`end timer pop cacheHits=${this.cacheHits} cacheMisses=${this.cacheMisses} fixedResponses=${this.fixedResponses}` +
             ` expiredOutgoingIDs=${expiredOutgoingIDs} outgoingIDToRequestInfo=${this.outgoingIDToRequestInfo.size} outgoingRequestInfoPriorityQueue=${this.outgoingRequestInfoPriorityQueue.length}` +
             ` expiredQuestionCacheKeys=${expiredQuestionCacheKeys} questionToResponse=${this.questionToResponse.size} questionToResponsePriorityQueue=${this.questionToResponsePriorityQueue.length}`);
     }
@@ -212,27 +224,41 @@ class DNSProxy {
         const decodedObject = dnsPacket.decode(message, null);
         // logger.info(`serverSocket message remoteInfo = ${stringifyPretty(remoteInfo)}\ndecodedObject = ${stringifyPretty(decodedObject)}`);
 
-        let cacheHit = false;
+        let responded = false;
 
         if (decodedObject.questions) {
 
             const questionCacheKey = stringify(decodedObject.questions).toLowerCase();
 
-            const cacheObject = this.questionToResponse.get(questionCacheKey);
-            if (cacheObject && this.adjustTTL(cacheObject)) {
-                const cachedResponse = cacheObject.decodedResponse;
-                cachedResponse.id = decodedObject.id;
+            const fixedResponse = this.questionToFixedResponse.get(questionCacheKey);
+            if (fixedResponse) {
+                fixedResponse.id = decodedObject.id;
 
-                const outgoingMessage = dnsPacket.encode(cachedResponse, null, null);
+                const outgoingMessage = dnsPacket.encode(fixedResponse, null, null);
                 this.serverSocket.send(outgoingMessage, 0, outgoingMessage.length, remoteInfo.port, remoteInfo.address);
 
-                cacheHit = true;
+                responded = true;
 
-                ++this.cacheHits;
+                ++this.fixedResponses;
+            }
+
+            if (!responded) {
+                const cacheObject = this.questionToResponse.get(questionCacheKey);
+                if (cacheObject && this.adjustTTL(cacheObject)) {
+                    const cachedResponse = cacheObject.decodedResponse;
+                    cachedResponse.id = decodedObject.id;
+
+                    const outgoingMessage = dnsPacket.encode(cachedResponse, null, null);
+                    this.serverSocket.send(outgoingMessage, 0, outgoingMessage.length, remoteInfo.port, remoteInfo.address);
+
+                    responded = true;
+
+                    ++this.cacheHits;
+                }
             }
         }
 
-        if (!cacheHit) {
+        if (!responded) {
             ++this.cacheMisses;
 
             const outgoingID = this.getRandomDNSID();
@@ -291,6 +317,8 @@ class DNSProxy {
 
     start() {
         logger.info('begin start');
+
+        this.buildFixedResponses();
 
         setInterval(() => this.timerPop(), this.configuration.timerIntervalSeconds * 1000);
 
