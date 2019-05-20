@@ -125,6 +125,38 @@ class CacheObject {
     }
 }
 ;
+const createTCPReadHandler = (messageCallback) => {
+    let readingHeader = true;
+    let buffer = Buffer.of();
+    let bodyLength = 0;
+    return (data) => {
+        buffer = Buffer.concat([buffer, data]);
+        let done = false;
+        while (!done) {
+            if (readingHeader) {
+                if (buffer.byteLength >= 2) {
+                    bodyLength = buffer.readUInt16BE(0);
+                    readingHeader = false;
+                }
+                else {
+                    done = true;
+                }
+            }
+            else {
+                if (buffer.byteLength >= (2 + bodyLength)) {
+                    const decodedMessage = dnsPacket.streamDecode(buffer.slice(0, 2 + bodyLength));
+                    messageCallback(decodedMessage);
+                    buffer = buffer.slice(2 + bodyLength);
+                    readingHeader = true;
+                    bodyLength = 0;
+                }
+                else {
+                    done = true;
+                }
+            }
+        }
+    };
+};
 class TCPRemoteServerConnection {
     constructor(configuration, messageCallback) {
         this.messageCallback = messageCallback;
@@ -159,36 +191,7 @@ class TCPRemoteServerConnection {
                 this.connecting = false;
                 this.requestBuffer = [];
             });
-            let readingHeader = true;
-            let buffer = Buffer.of();
-            let bodyLength = 0;
-            socket.on('data', (data) => {
-                buffer = Buffer.concat([buffer, data]);
-                let done = false;
-                while (!done) {
-                    if (readingHeader) {
-                        if (buffer.byteLength >= 2) {
-                            bodyLength = buffer.readUInt16BE(0);
-                            readingHeader = false;
-                        }
-                        else {
-                            done = true;
-                        }
-                    }
-                    else {
-                        if (buffer.byteLength >= (2 + bodyLength)) {
-                            const decodedMessage = dnsPacket.streamDecode(buffer.slice(0, 2 + bodyLength));
-                            this.messageCallback(decodedMessage);
-                            buffer = buffer.slice(2 + bodyLength);
-                            readingHeader = true;
-                            bodyLength = 0;
-                        }
-                        else {
-                            done = true;
-                        }
-                    }
-                }
-            });
+            socket.on('data', createTCPReadHandler((decodedMessage) => this.messageCallback(decodedMessage)));
             socket.on('timeout', () => {
                 socket.destroy();
             });
@@ -418,36 +421,9 @@ class DNSProxy {
             });
             connection.on('close', () => {
             });
-            let readingHeader = true;
-            let buffer = Buffer.of();
-            let bodyLength = 0;
-            connection.on('data', (data) => {
-                buffer = Buffer.concat([buffer, data]);
-                let done = false;
-                while (!done) {
-                    if (readingHeader) {
-                        if (buffer.byteLength >= 2) {
-                            bodyLength = buffer.readUInt16BE(0);
-                            readingHeader = false;
-                        }
-                        else {
-                            done = true;
-                        }
-                    }
-                    else {
-                        if (buffer.byteLength >= (2 + bodyLength)) {
-                            const decodedMessage = dnsPacket.streamDecode(buffer.slice(0, 2 + bodyLength));
-                            this.handleServerSocketMessage(decodedMessage, RemoteInfo.createTCP(connection));
-                            buffer = buffer.slice(2 + bodyLength);
-                            readingHeader = true;
-                            bodyLength = 0;
-                        }
-                        else {
-                            done = true;
-                        }
-                    }
-                }
-            });
+            connection.on('data', createTCPReadHandler((decodedMessage) => {
+                this.handleServerSocketMessage(decodedMessage, RemoteInfo.createTCP(connection));
+            }));
             connection.on('timeout', () => {
                 connection.destroy();
             });
