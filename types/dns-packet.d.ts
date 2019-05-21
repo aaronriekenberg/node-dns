@@ -5,6 +5,22 @@ export const DNSSEC_OK: number;
 export const RECURSION_AVAILABLE: number;
 export const RECURSION_DESIRED: number;
 export const TRUNCATED_RESPONSE: number;
+
+export interface DNSAnswer {
+    ttl?: number;
+}
+
+export interface DNSQuestion {
+
+}
+
+export interface DNSPacket {
+    id?: number;
+    rcode?: string;
+    questions?: DNSQuestion[];
+    answers?: DNSAnswer[];
+}
+
 export namespace a {
     function decode(buf: any, offset: any): any;
     namespace decode {
@@ -61,7 +77,7 @@ export namespace cname {
     }
     function encodingLength(data: any): any;
 }
-export function decode(buf: any, offset: any): any;
+export function decode(buf: Buffer, offset?: number): DNSPacket;
 export namespace decode {
     const bytes: number;
 }
@@ -101,7 +117,7 @@ export namespace ds {
     }
     function encodingLength(digest: any): any;
 }
-export function encode(result: any, buf: any, offset: any): any;
+export function encode(result: DNSPacket, buf?: Buffer, offset?: number): Buffer;
 export namespace encode {
     const bytes: number;
 }
@@ -258,11 +274,11 @@ export namespace srv {
     }
     function encodingLength(data: any): any;
 }
-export function streamDecode(sbuf: any): any;
+export function streamDecode(sbuf: Buffer): DNSPacket;
 export namespace streamDecode {
     const bytes: number;
 }
-export function streamEncode(result: any): any;
+export function streamEncode(result: DNSPacket): Buffer;
 export namespace streamEncode {
     const bytes: number;
 }
