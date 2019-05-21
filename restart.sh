@@ -11,4 +11,4 @@ if [ ! -d logs ]; then
   mkdir logs
 fi
 
-nohup ./built/server.js $CONFIG_FILE 2>&1 | svlogd logs &
+nohup ./built/dns.js $CONFIG_FILE 2>&1 | svlogd logs &
