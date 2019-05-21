@@ -55,7 +55,7 @@ interface Configuration {
     readonly requestTimeoutSeconds: number;
     readonly tcpConnectionTimeoutSeconds: number;
     readonly timerIntervalSeconds: number;
-    readonly fixedResponses?: any[];
+    readonly fixedResponses?: dnsPacket.DNSPacket[];
 };
 
 class RemoteInfo {
@@ -257,7 +257,7 @@ class DNSProxy {
     private readonly outgoingIDToRequestInfo = new Map<number, OutgoingRequestInfo>();
     private readonly outgoingRequestInfoPriorityQueue = new TinyQueue<OutgoingRequestInfo>([], (a: OutgoingRequestInfo, b: OutgoingRequestInfo) => a.compareByExpirationTime(b));
 
-    private readonly questionToFixedResponse = new Map<string, any>();
+    private readonly questionToFixedResponse = new Map<string, dnsPacket.DNSPacket>();
 
     private readonly questionToResponse = new Map<string, CacheObject>();
     private readonly questionToResponsePriorityQueue = new TinyQueue<CacheObject>([], (a: CacheObject, b: CacheObject) => a.compareByExpirationTime(b));
