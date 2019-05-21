@@ -75,7 +75,7 @@ class RemoteInfo {
         return new RemoteInfo(null, null, tcpSocket);
     }
 
-    writeResponse(dnsResponse: any) {
+    writeResponse(dnsResponse: dnsPacket.DNSPacket) {
         if (this.udpSocket && this.udpRemoteInfo) {
             const outgoingMessage = dnsPacket.encode(dnsResponse);
             this.udpSocket.send(outgoingMessage, 0, outgoingMessage.length, this.udpRemoteInfo.port, this.udpRemoteInfo.address);
