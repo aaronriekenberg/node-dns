@@ -368,10 +368,21 @@ class DNSProxy {
             }
         }
 
-        logger.info(`end timer pop cacheHits=${this.cacheHits} cacheMisses=${this.cacheMisses} fixedResponses=${this.fixedResponses}` +
-            ` expiredOutgoingIDs=${expiredOutgoingIDs} outgoingIDToRequestInfo=${this.outgoingIDToRequestInfo.size} outgoingRequestInfoPriorityQueue=${this.outgoingRequestInfoPriorityQueue.length}` +
-            ` expiredQuestionCacheKeys=${expiredQuestionCacheKeys} questionToResponse=${this.questionToResponse.size} questionToResponsePriorityQueue=${this.questionToResponsePriorityQueue.length}` +
-            ` remoteUDPRequests=${this.remoteUDPRequests} remoteTCPRequests=${this.remoteTCPRequests}`);
+        const metrics = {
+            cacheHits: this.cacheHits,
+            cacheMisses: this.cacheMisses,
+            fixedResponses: this.fixedResponses,
+            expiredOutgoingIDs,
+            outgoingIDToRequestInfo: this.outgoingIDToRequestInfo.size,
+            outgoingRequestInfoPriorityQueue: this.outgoingRequestInfoPriorityQueue.length,
+            expiredQuestionCacheKeys,
+            questionToResponse: this.questionToResponse.size,
+            questionToResponsePriorityQueue: this.questionToResponsePriorityQueue.length,
+            remoteUDPRequests: this.remoteUDPRequests,
+            remoteTCPRequests: this.remoteTCPRequests
+        };
+
+        logger.info(`end timer pop ${stringify(metrics)}`);
     }
 
     private handleServerSocketMessage(decodedRequestObject: dnsPacket.DNSPacket, clientRemoteInfo: RemoteInfo) {
