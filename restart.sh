@@ -1,9 +1,8 @@
 #!/bin/sh -x
 
-KILL_CMD=pkill
 CONFIG_FILE=config/$(hostname -s)-config.json
 
-$KILL_CMD node
+pkill -f 'node ./built/dns.js'
 
 sleep 2
 
