@@ -250,6 +250,9 @@ class DNSProxy {
             if ((answer.ttl === undefined) || (answer.ttl < this.configuration.minTTLSeconds)) {
                 answer.ttl = this.configuration.minTTLSeconds;
             }
+            if (answer.ttl > this.configuration.maxTTLSeconds) {
+                answer.ttl = this.configuration.maxTTLSeconds;
+            }
             answer[DNSProxy.originalTTLSymbol] = answer.ttl;
             if ((minTTL === undefined) || (answer.ttl < minTTL)) {
                 minTTL = answer.ttl;

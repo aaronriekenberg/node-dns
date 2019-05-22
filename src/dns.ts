@@ -52,6 +52,7 @@ interface Configuration {
     readonly remoteAddress: string;
     readonly remotePort: number;
     readonly minTTLSeconds: number;
+    readonly maxTTLSeconds: number;
     readonly requestTimeoutSeconds: number;
     readonly tcpConnectionTimeoutSeconds: number;
     readonly timerIntervalSeconds: number;
@@ -301,6 +302,9 @@ class DNSProxy {
         (answers || []).forEach((answer) => {
             if ((answer.ttl === undefined) || (answer.ttl < this.configuration.minTTLSeconds)) {
                 answer.ttl = this.configuration.minTTLSeconds;
+            }
+            if (answer.ttl > this.configuration.maxTTLSeconds) {
+                answer.ttl = this.configuration.maxTTLSeconds;
             }
             (answer as any)[DNSProxy.originalTTLSymbol] = answer.ttl;
             if ((minTTL === undefined) || (answer.ttl < minTTL)) {
