@@ -231,6 +231,21 @@ class DNSProxy {
             this.handleRemoteSocketMessage(decodedMessage);
         });
     }
+    getQuestionCacheKey(questions) {
+        let key;
+        let firstQuestion = true;
+        (questions || []).forEach((question) => {
+            if (firstQuestion) {
+                key = "";
+            }
+            else {
+                key += '|';
+            }
+            key += `name:${question.name}_type:${question.type}_class:${question.class}`.toLowerCase();
+            firstQuestion = false;
+        });
+        return key;
+    }
     getRandomDNSID() {
         const getRandomInt = (min, max) => {
             return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -239,7 +254,10 @@ class DNSProxy {
     }
     buildFixedResponses() {
         (this.configuration.fixedResponses || []).forEach((fixedResponse) => {
-            const questionCacheKey = stringify(fixedResponse.questions).toLowerCase();
+            const questionCacheKey = this.getQuestionCacheKey(fixedResponse.questions);
+            if (!questionCacheKey) {
+                throw new Error('fixed response missing questions');
+            }
             this.questionToFixedResponse.set(questionCacheKey, fixedResponse);
         });
         logger.info(`questionToFixedResponse.size = ${this.questionToFixedResponse.size}`);
@@ -334,15 +352,17 @@ class DNSProxy {
             return;
         }
         let responded = false;
-        const questionCacheKey = stringify(decodedRequestObject.questions).toLowerCase();
-        const fixedResponse = this.questionToFixedResponse.get(questionCacheKey);
-        if (fixedResponse) {
-            fixedResponse.id = decodedRequestObject.id;
-            clientRemoteInfo.writeResponse(fixedResponse);
-            responded = true;
-            ++this.fixedResponses;
+        const questionCacheKey = this.getQuestionCacheKey(decodedRequestObject.questions);
+        if (questionCacheKey) {
+            const fixedResponse = this.questionToFixedResponse.get(questionCacheKey);
+            if (fixedResponse) {
+                fixedResponse.id = decodedRequestObject.id;
+                clientRemoteInfo.writeResponse(fixedResponse);
+                responded = true;
+                ++this.fixedResponses;
+            }
         }
-        if (!responded) {
+        if ((!responded) && questionCacheKey) {
             const cacheObject = this.questionToResponse.get(questionCacheKey);
             if (cacheObject && this.adjustTTL(cacheObject)) {
                 const cachedResponse = cacheObject.decodedResponse;
@@ -377,16 +397,17 @@ class DNSProxy {
             logger.warn(`handleRemoteSocketMessage invalid decodedResponseObject ${decodedResponseObject}`);
             return;
         }
-        if ((decodedResponseObject.rcode === 'NOERROR') &&
-            decodedResponseObject.questions) {
+        if (decodedResponseObject.rcode === 'NOERROR') {
             const minTTLSeconds = this.getMinTTLSecondsForAnswers(decodedResponseObject.answers);
             if ((minTTLSeconds !== undefined) && (minTTLSeconds > 0)) {
-                const questionCacheKey = stringify(decodedResponseObject.questions).toLowerCase();
-                const nowSeconds = getNowSeconds();
-                const expirationTimeSeconds = nowSeconds + minTTLSeconds;
-                const cacheObject = new CacheObject(questionCacheKey, decodedResponseObject, nowSeconds, expirationTimeSeconds);
-                this.questionToResponsePriorityQueue.push(cacheObject);
-                this.questionToResponse.set(questionCacheKey, cacheObject);
+                const questionCacheKey = this.getQuestionCacheKey(decodedResponseObject.questions);
+                if (questionCacheKey) {
+                    const nowSeconds = getNowSeconds();
+                    const expirationTimeSeconds = nowSeconds + minTTLSeconds;
+                    const cacheObject = new CacheObject(questionCacheKey, decodedResponseObject, nowSeconds, expirationTimeSeconds);
+                    this.questionToResponsePriorityQueue.push(cacheObject);
+                    this.questionToResponse.set(questionCacheKey, cacheObject);
+                }
             }
         }
         const clientRequestInfo = this.outgoingIDToRequestInfo.get(decodedResponseObject.id);

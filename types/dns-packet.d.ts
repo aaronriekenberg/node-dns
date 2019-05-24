@@ -11,7 +11,9 @@ export interface DNSAnswer {
 }
 
 export interface DNSQuestion {
-
+    name?: string;
+    type?: string;
+    class?: string;
 }
 
 export interface DNSPacket {
