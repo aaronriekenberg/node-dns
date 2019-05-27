@@ -368,7 +368,7 @@ class DNSProxy {
         } else {
             const secondsInCache = nowSeconds - cacheObject.cacheTimeSeconds;
 
-            const adjustObject = (object: { ttl?: number, [DNSProxy.originalTTLSymbol]?: number }) => {
+            const adjustObject = (object: { ttl?: number, readonly [DNSProxy.originalTTLSymbol]?: number }) => {
                 const originalTTL = object[DNSProxy.originalTTLSymbol];
                 if (!isNumber(originalTTL)) {
                     valid = false;
