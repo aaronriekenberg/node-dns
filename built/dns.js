@@ -284,15 +284,9 @@ class DNSProxy {
                 minTTL = object.ttl;
             }
         };
-        (response.answers || []).forEach((answer) => {
-            processObject(answer);
-        });
-        (response.additionals || []).forEach((additional) => {
-            processObject(additional);
-        });
-        (response.authorities || []).forEach((authority) => {
-            processObject(authority);
-        });
+        (response.answers || []).forEach((answer) => processObject(answer));
+        (response.additionals || []).forEach((additional) => processObject(additional));
+        (response.authorities || []).forEach((authority) => processObject(authority));
         return minTTL;
     }
     adjustTTL(cacheObject) {
@@ -316,15 +310,9 @@ class DNSProxy {
                     }
                 }
             };
-            (cacheObject.decodedResponse.answers || []).forEach((answer) => {
-                adjustObject(answer);
-            });
-            (cacheObject.decodedResponse.additionals || []).forEach((additional) => {
-                adjustObject(additional);
-            });
-            (cacheObject.decodedResponse.authorities || []).forEach((authority) => {
-                adjustObject(authority);
-            });
+            (cacheObject.decodedResponse.answers || []).forEach((answer) => adjustObject(answer));
+            (cacheObject.decodedResponse.additionals || []).forEach((additional) => adjustObject(additional));
+            (cacheObject.decodedResponse.authorities || []).forEach((authority) => adjustObject(authority));
         }
         return valid;
     }
