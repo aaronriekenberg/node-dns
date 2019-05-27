@@ -332,43 +332,29 @@ class DNSProxy {
 
         let minTTL: number | undefined;
 
+        const processObject = (object: { ttl?: number }) => {
+            if ((object.ttl === undefined) || (object.ttl < this.configuration.minTTLSeconds)) {
+                object.ttl = this.configuration.minTTLSeconds;
+            }
+            if (object.ttl > this.configuration.maxTTLSeconds) {
+                object.ttl = this.configuration.maxTTLSeconds;
+            }
+            (object as any)[DNSProxy.originalTTLSymbol] = object.ttl;
+            if ((minTTL === undefined) || (object.ttl < minTTL)) {
+                minTTL = object.ttl;
+            }
+        };
+
         (response.answers || []).forEach((answer) => {
-            if ((answer.ttl === undefined) || (answer.ttl < this.configuration.minTTLSeconds)) {
-                answer.ttl = this.configuration.minTTLSeconds;
-            }
-            if (answer.ttl > this.configuration.maxTTLSeconds) {
-                answer.ttl = this.configuration.maxTTLSeconds;
-            }
-            (answer as any)[DNSProxy.originalTTLSymbol] = answer.ttl;
-            if ((minTTL === undefined) || (answer.ttl < minTTL)) {
-                minTTL = answer.ttl;
-            }
+            processObject(answer);
         });
 
         (response.additionals || []).forEach((additional) => {
-            if ((additional.ttl === undefined) || (additional.ttl < this.configuration.minTTLSeconds)) {
-                additional.ttl = this.configuration.minTTLSeconds;
-            }
-            if (additional.ttl > this.configuration.maxTTLSeconds) {
-                additional.ttl = this.configuration.maxTTLSeconds;
-            }
-            (additional as any)[DNSProxy.originalTTLSymbol] = additional.ttl;
-            if ((minTTL === undefined) || (additional.ttl < minTTL)) {
-                minTTL = additional.ttl;
-            }
+            processObject(additional);
         });
 
         (response.authorities || []).forEach((authority) => {
-            if ((authority.ttl === undefined) || (authority.ttl < this.configuration.minTTLSeconds)) {
-                authority.ttl = this.configuration.minTTLSeconds;
-            }
-            if (authority.ttl > this.configuration.maxTTLSeconds) {
-                authority.ttl = this.configuration.maxTTLSeconds;
-            }
-            (authority as any)[DNSProxy.originalTTLSymbol] = authority.ttl;
-            if ((minTTL === undefined) || (authority.ttl < minTTL)) {
-                minTTL = authority.ttl;
-            }
+            processObject(authority);
         });
 
         return minTTL;
@@ -385,23 +371,22 @@ class DNSProxy {
             valid = false;
         } else {
             const secondsInCache = nowSeconds - cacheObject.cacheTimeSeconds;
-            (cacheObject.decodedResponse.answers || []).forEach((answer) => {
-                answer.ttl = (answer as any)[DNSProxy.originalTTLSymbol] - secondsInCache;
-                if (answer.ttl <= 0) {
+
+            const adjustObject = (object: { ttl?: number }) => {
+                object.ttl = (object as any)[DNSProxy.originalTTLSymbol] - secondsInCache;
+                if (object.ttl <= 0) {
                     valid = false;
                 }
+            };
+
+            (cacheObject.decodedResponse.answers || []).forEach((answer) => {
+                adjustObject(answer);
             });
             (cacheObject.decodedResponse.additionals || []).forEach((additional) => {
-                additional.ttl = (additional as any)[DNSProxy.originalTTLSymbol] - secondsInCache;
-                if (additional.ttl <= 0) {
-                    valid = false;
-                }
+                adjustObject(additional);
             });
             (cacheObject.decodedResponse.authorities || []).forEach((authority) => {
-                authority.ttl = (authority as any)[DNSProxy.originalTTLSymbol] - secondsInCache;
-                if (authority.ttl <= 0) {
-                    valid = false;
-                }
+                adjustObject(authority);
             });
         }
 
