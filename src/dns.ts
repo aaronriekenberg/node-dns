@@ -617,42 +617,44 @@ class DNSProxy {
         let responseQuestionCacheKey = this.getQuestionCacheKey(decodedResponseObject.questions);
 
         const clientRequestInfo = this.outgoingIDToRequestInfo.get(decodedResponseObject.id);
-        if (clientRequestInfo) {
-            this.outgoingIDToRequestInfo.delete(decodedResponseObject.id);
-
-            if (responseQuestionCacheKey !== clientRequestInfo.questionCacheKey) {
-                ++this.metrics.responseQuestionCacheKeyMismatch;
-                return;
-            }
-
-            if ((decodedResponseObject.rcode === 'NOERROR') ||
-                (decodedResponseObject.rcode === 'NXDOMAIN')) {
-
-                const minTTLSeconds = this.getMinTTLSecondsForResponse(decodedResponseObject);
-
-                if (isPositiveNumber(minTTLSeconds)) {
-
-                    const nowSeconds = getNowSeconds();
-
-                    const expirationTimeSeconds = nowSeconds + minTTLSeconds;
-
-                    const cacheObject = new CacheObject(
-                        clientRequestInfo.questionCacheKey,
-                        decodedResponseObject,
-                        nowSeconds,
-                        expirationTimeSeconds);
-
-                    this.questionToResponsePriorityQueue.push(cacheObject);
-                    this.questionToResponse.set(clientRequestInfo.questionCacheKey, cacheObject);
-                }
-            }
-
-            decodedResponseObject.id = clientRequestInfo.clientRequestID;
-
-            const clientRemoteInfo = clientRequestInfo.clientRemoteInfo;
-
-            clientRemoteInfo.writeResponse(decodedResponseObject);
+        if (!clientRequestInfo) {
+            return;
         }
+
+        this.outgoingIDToRequestInfo.delete(decodedResponseObject.id);
+
+        if (responseQuestionCacheKey !== clientRequestInfo.questionCacheKey) {
+            ++this.metrics.responseQuestionCacheKeyMismatch;
+            return;
+        }
+
+        if ((decodedResponseObject.rcode === 'NOERROR') ||
+            (decodedResponseObject.rcode === 'NXDOMAIN')) {
+
+            const minTTLSeconds = this.getMinTTLSecondsForResponse(decodedResponseObject);
+
+            if (isPositiveNumber(minTTLSeconds)) {
+
+                const nowSeconds = getNowSeconds();
+
+                const expirationTimeSeconds = nowSeconds + minTTLSeconds;
+
+                const cacheObject = new CacheObject(
+                    clientRequestInfo.questionCacheKey,
+                    decodedResponseObject,
+                    nowSeconds,
+                    expirationTimeSeconds);
+
+                this.questionToResponsePriorityQueue.push(cacheObject);
+                this.questionToResponse.set(clientRequestInfo.questionCacheKey, cacheObject);
+            }
+        }
+
+        decodedResponseObject.id = clientRequestInfo.clientRequestID;
+
+        const clientRemoteInfo = clientRequestInfo.clientRemoteInfo;
+
+        clientRemoteInfo.writeResponse(decodedResponseObject);
     }
 
     private setupSocketEvents() {
