@@ -80,11 +80,12 @@ class RemoteInfo {
 }
 ;
 class OutgoingRequestInfo {
-    constructor(outgoingRequestID, clientRemoteInfo, clientRequestID, expirationTimeSeconds) {
+    constructor(outgoingRequestID, clientRemoteInfo, clientRequestID, expirationTimeSeconds, requestQuestionCacheKey) {
         this.outgoingRequestID = outgoingRequestID;
         this.clientRemoteInfo = clientRemoteInfo;
         this.clientRequestID = clientRequestID;
         this.expirationTimeSeconds = expirationTimeSeconds;
+        this.requestQuestionCacheKey = requestQuestionCacheKey;
     }
     expired(nowSeconds) {
         return nowSeconds >= this.expirationTimeSeconds;
@@ -374,12 +375,12 @@ class DNSProxy {
         }
         if (!responded) {
             ++this.cacheMisses;
-            const outgoingID = this.getRandomDNSID();
-            const requestTimeoutSeconds = getNowSeconds() + this.configuration.requestTimeoutSeconds;
-            const outgoingRequestInfo = new OutgoingRequestInfo(outgoingID, clientRemoteInfo, decodedRequestObject.id, requestTimeoutSeconds);
+            const outgoingRequestID = this.getRandomDNSID();
+            const expirationTimeSeconds = getNowSeconds() + this.configuration.requestTimeoutSeconds;
+            const outgoingRequestInfo = new OutgoingRequestInfo(outgoingRequestID, clientRemoteInfo, decodedRequestObject.id, expirationTimeSeconds, questionCacheKey);
             this.outgoingRequestInfoPriorityQueue.push(outgoingRequestInfo);
-            this.outgoingIDToRequestInfo.set(outgoingID, outgoingRequestInfo);
-            decodedRequestObject.id = outgoingID;
+            this.outgoingIDToRequestInfo.set(outgoingRequestID, outgoingRequestInfo);
+            decodedRequestObject.id = outgoingRequestID;
             if (clientRemoteInfo.isUDP) {
                 ++this.remoteUDPRequests;
                 const outgoingMessage = dnsPacket.encode(decodedRequestObject);
@@ -397,22 +398,26 @@ class DNSProxy {
             logger.warn(`handleRemoteSocketMessage invalid decodedResponseObject ${decodedResponseObject}`);
             return;
         }
+        let responseQuestionCacheKey;
         if (decodedResponseObject.rcode === 'NOERROR') {
             const minTTLSeconds = this.getMinTTLSecondsForAnswers(decodedResponseObject.answers);
             if ((minTTLSeconds !== undefined) && (minTTLSeconds > 0)) {
-                const questionCacheKey = this.getQuestionCacheKey(decodedResponseObject.questions);
-                if (questionCacheKey) {
+                responseQuestionCacheKey = this.getQuestionCacheKey(decodedResponseObject.questions);
+                if (responseQuestionCacheKey) {
                     const nowSeconds = getNowSeconds();
                     const expirationTimeSeconds = nowSeconds + minTTLSeconds;
-                    const cacheObject = new CacheObject(questionCacheKey, decodedResponseObject, nowSeconds, expirationTimeSeconds);
+                    const cacheObject = new CacheObject(responseQuestionCacheKey, decodedResponseObject, nowSeconds, expirationTimeSeconds);
                     this.questionToResponsePriorityQueue.push(cacheObject);
-                    this.questionToResponse.set(questionCacheKey, cacheObject);
+                    this.questionToResponse.set(responseQuestionCacheKey, cacheObject);
                 }
             }
         }
         const clientRequestInfo = this.outgoingIDToRequestInfo.get(decodedResponseObject.id);
         if (clientRequestInfo) {
             this.outgoingIDToRequestInfo.delete(decodedResponseObject.id);
+            if (clientRequestInfo.requestQuestionCacheKey !== responseQuestionCacheKey) {
+                logger.warn(`clientRequestInfo.requestQuestionCacheKey !== responseQuestionCacheKey requestQuestionCacheKey=${clientRequestInfo.requestQuestionCacheKey} responseQuestionCacheKey=${responseQuestionCacheKey}`);
+            }
             decodedResponseObject.id = clientRequestInfo.clientRequestID;
             const clientRemoteInfo = clientRequestInfo.clientRemoteInfo;
             clientRemoteInfo.writeResponse(decodedResponseObject);

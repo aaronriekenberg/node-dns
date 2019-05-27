@@ -100,7 +100,8 @@ class OutgoingRequestInfo {
         readonly outgoingRequestID: number,
         readonly clientRemoteInfo: RemoteInfo,
         readonly clientRequestID: number,
-        readonly expirationTimeSeconds: number) {
+        readonly expirationTimeSeconds: number,
+        readonly requestQuestionCacheKey: string | undefined) {
 
     }
 
@@ -451,17 +452,22 @@ class DNSProxy {
         if (!responded) {
             ++this.cacheMisses;
 
-            const outgoingID = this.getRandomDNSID();
+            const outgoingRequestID = this.getRandomDNSID();
 
-            const requestTimeoutSeconds = getNowSeconds() + this.configuration.requestTimeoutSeconds;
+            const expirationTimeSeconds = getNowSeconds() + this.configuration.requestTimeoutSeconds;
 
             const outgoingRequestInfo =
-                new OutgoingRequestInfo(outgoingID, clientRemoteInfo, decodedRequestObject.id, requestTimeoutSeconds);
+                new OutgoingRequestInfo(
+                    outgoingRequestID,
+                    clientRemoteInfo,
+                    decodedRequestObject.id,
+                    expirationTimeSeconds,
+                    questionCacheKey);
 
             this.outgoingRequestInfoPriorityQueue.push(outgoingRequestInfo);
-            this.outgoingIDToRequestInfo.set(outgoingID, outgoingRequestInfo);
+            this.outgoingIDToRequestInfo.set(outgoingRequestID, outgoingRequestInfo);
 
-            decodedRequestObject.id = outgoingID;
+            decodedRequestObject.id = outgoingRequestID;
 
             if (clientRemoteInfo.isUDP) {
                 ++this.remoteUDPRequests;
@@ -482,23 +488,25 @@ class DNSProxy {
             return;
         }
 
+        let responseQuestionCacheKey: string | undefined;
+
         if (decodedResponseObject.rcode === 'NOERROR') {
 
             const minTTLSeconds = this.getMinTTLSecondsForAnswers(decodedResponseObject.answers);
 
             if ((minTTLSeconds !== undefined) && (minTTLSeconds > 0)) {
 
-                const questionCacheKey = this.getQuestionCacheKey(decodedResponseObject.questions);
+                responseQuestionCacheKey = this.getQuestionCacheKey(decodedResponseObject.questions);
 
-                if (questionCacheKey) {
+                if (responseQuestionCacheKey) {
                     const nowSeconds = getNowSeconds();
                     const expirationTimeSeconds = nowSeconds + minTTLSeconds;
 
                     const cacheObject = new CacheObject(
-                        questionCacheKey, decodedResponseObject, nowSeconds, expirationTimeSeconds);
+                        responseQuestionCacheKey, decodedResponseObject, nowSeconds, expirationTimeSeconds);
 
                     this.questionToResponsePriorityQueue.push(cacheObject);
-                    this.questionToResponse.set(questionCacheKey, cacheObject);
+                    this.questionToResponse.set(responseQuestionCacheKey, cacheObject);
                 }
             }
         }
@@ -506,6 +514,10 @@ class DNSProxy {
         const clientRequestInfo = this.outgoingIDToRequestInfo.get(decodedResponseObject.id);
         if (clientRequestInfo) {
             this.outgoingIDToRequestInfo.delete(decodedResponseObject.id);
+
+            if (clientRequestInfo.requestQuestionCacheKey !== responseQuestionCacheKey) {
+                logger.warn(`clientRequestInfo.requestQuestionCacheKey !== responseQuestionCacheKey requestQuestionCacheKey=${clientRequestInfo.requestQuestionCacheKey} responseQuestionCacheKey=${responseQuestionCacheKey}`);
+            }
 
             decodedResponseObject.id = clientRequestInfo.clientRequestID;
 
