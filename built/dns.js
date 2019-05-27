@@ -176,7 +176,7 @@ class UDPRemoteServerConnection {
             }
         });
         this.socket.on('listening', () => {
-            logger.info(`udpRemoteSocket listening on ${stringify(this.socket.address())} remoteAddressAndPort=${stringify(this.remoteAddressAndPort)}`);
+            logger.info(`udpRemoteSocket listening on ${stringify(this.socket.address())} remoteAddressAndPort=${stringify(this.remoteAddressAndPort)} rcvbuf=${this.socket.getRecvBufferSize()} sndbuf=${this.socket.getSendBufferSize()}`);
             this.socketListening = true;
         });
         this.socket.on('message', (message, remoteInfo) => {
@@ -504,7 +504,7 @@ class DNSProxy {
         });
         this.udpServerSocket.on('listening', () => {
             udpServerSocketListening = true;
-            logger.info(`udpServerSocket listening on ${stringify(this.udpServerSocket.address())}`);
+            logger.info(`udpServerSocket listening on ${stringify(this.udpServerSocket.address())} rcvbuf=${this.udpServerSocket.getRecvBufferSize()} sndbuf=${this.udpServerSocket.getSendBufferSize()}`);
         });
         this.udpServerSocket.on('message', (message, remoteInfo) => {
             const decodedMessage = dnsPacket.decode(message);
