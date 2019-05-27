@@ -4,6 +4,8 @@ Caching dns proxy using TypeScript and Node.
 
 Stable enough to use as my only DNS server on my home network.
 
+Loosely based on [rebound](https://github.com/openbsd/src/blob/master/usr.sbin/rebound/rebound.c) in OpenBSD.
+
 ## Features:
 * Uses excellent [dns-packet](https://www.npmjs.com/package/dns-packet) library for serializing and unserializing DNS messages.
 * UDP and TCP support
