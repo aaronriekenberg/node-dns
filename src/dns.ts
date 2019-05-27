@@ -194,20 +194,39 @@ const createTCPReadHandler = (messageCallback: (decodedMessage: dnsPacket.DNSPac
     };
 };
 
+const createUDPSocket = (socketBufferSizes?: SocketBufferSizes): dgram.Socket => {
+    let recvBufferSize: number | undefined;
+    let sendBufferSize: number | undefined;
+
+    if (socketBufferSizes) {
+        recvBufferSize = socketBufferSizes.rcvbuf;
+        sendBufferSize = socketBufferSizes.sndbuf;
+    }
+
+    return dgram.createSocket({
+        type: 'udp4',
+        recvBufferSize,
+        sendBufferSize
+    });
+};
+
 interface RemoteServerConnection {
     writeRequest(dnsRequest: dnsPacket.DNSPacket): void;
 }
 
 class UDPRemoteServerConnection implements RemoteServerConnection {
 
-    private readonly socket = dgram.createSocket('udp4');
+    private readonly socket: dgram.Socket;
 
     private socketListening = false;
 
     constructor(
         private readonly remoteAddressAndPort: AddressAndPort,
         private readonly messageCallback: (decodedMessage: dnsPacket.DNSPacket) => void,
-        private readonly socketBufferSizes?: SocketBufferSizes) {
+        socketBufferSizes?: SocketBufferSizes) {
+
+        this.socket = createUDPSocket(socketBufferSizes);
+
         this.setupSocketEvents();
     }
 
@@ -221,14 +240,7 @@ class UDPRemoteServerConnection implements RemoteServerConnection {
         });
 
         this.socket.on('listening', () => {
-
             this.socketListening = true;
-
-            if (this.socketBufferSizes) {
-                this.socket.setSendBufferSize(this.socketBufferSizes.sndbuf);
-                this.socket.setRecvBufferSize(this.socketBufferSizes.rcvbuf);
-            }
-
             logger.info(`udpRemoteSocket listening on ${stringify(this.socket.address())} remoteAddressAndPort=${stringify(this.remoteAddressAndPort)} rcvbuf=${this.socket.getRecvBufferSize()} sndbuf=${this.socket.getSendBufferSize()}`);
         });
 
@@ -341,7 +353,7 @@ class DNSProxy {
     private readonly questionToResponse = new Map<string, CacheObject>();
     private readonly questionToResponsePriorityQueue = new TinyQueue<CacheObject>([], (a: CacheObject, b: CacheObject) => a.compareByExpirationTime(b));
 
-    private readonly udpServerSocket = dgram.createSocket('udp4');
+    private readonly udpServerSocket: dgram.Socket;
 
     private readonly tcpServerSocket = net.createServer();
 
@@ -350,6 +362,8 @@ class DNSProxy {
     private readonly tcpRemoteServerConnections: TCPRemoteServerConnection[] = [];
 
     constructor(private readonly configuration: Configuration) {
+        this.udpServerSocket = createUDPSocket(configuration.udpSocketBufferSizes);
+
         configuration.remoteAddressesAndPorts.forEach((remoteAddressAndPort) => {
             this.udpRemoteServerConnections.push(
                 new UDPRemoteServerConnection(
@@ -673,14 +687,7 @@ class DNSProxy {
         });
 
         this.udpServerSocket.on('listening', () => {
-
             udpServerSocketListening = true;
-
-            if (this.configuration.udpSocketBufferSizes) {
-                this.udpServerSocket.setSendBufferSize(this.configuration.udpSocketBufferSizes.sndbuf);
-                this.udpServerSocket.setRecvBufferSize(this.configuration.udpSocketBufferSizes.rcvbuf);
-            }
-
             logger.info(`udpServerSocket listening on ${stringify(this.udpServerSocket.address())} rcvbuf=${this.udpServerSocket.getRecvBufferSize()} sndbuf=${this.udpServerSocket.getSendBufferSize()}`);
         });
 
