@@ -46,8 +46,12 @@ const getNowSeconds = (): number => {
     return now.getTime() / 1000.;
 };
 
+const isNumber = (x: number | null | undefined): x is number => {
+    return (typeof x === 'number');
+};
+
 const isPositiveNumber = (x: number | null | undefined): x is number => {
-    return ((typeof x === 'number') && (x > 0));
+    return (isNumber(x) && (x > 0));
 };
 
 interface Configuration {
@@ -333,7 +337,7 @@ class DNSProxy {
         let minTTL: number | undefined;
 
         const processObject = (object: { ttl?: number, [DNSProxy.originalTTLSymbol]?: number }) => {
-            if ((object.ttl === undefined) || (object.ttl < this.configuration.minTTLSeconds)) {
+            if ((!isNumber(object.ttl)) || (object.ttl < this.configuration.minTTLSeconds)) {
                 object.ttl = this.configuration.minTTLSeconds;
             }
             if (object.ttl > this.configuration.maxTTLSeconds) {
@@ -374,7 +378,7 @@ class DNSProxy {
 
             const adjustObject = (object: { ttl?: number, [DNSProxy.originalTTLSymbol]?: number }) => {
                 const originalTTL = object[DNSProxy.originalTTLSymbol];
-                if (originalTTL === undefined) {
+                if (!isNumber(originalTTL)) {
                     valid = false;
                 } else {
                     object.ttl = originalTTL - secondsInCache;
@@ -450,7 +454,7 @@ class DNSProxy {
     private handleServerSocketMessage(decodedRequestObject: dnsPacket.DNSPacket, clientRemoteInfo: RemoteInfo) {
         // logger.info(`serverSocket message remoteInfo = ${stringifyPretty(clientRemoteInfo)}\ndecodedRequestObject = ${stringifyPretty(decodedRequestObject)}`);
 
-        if ((decodedRequestObject.id === undefined) || (decodedRequestObject.questions === undefined)) {
+        if (!isNumber(decodedRequestObject.id)) {
             logger.warn(`handleServerSocketMessage invalid decodedRequestObject ${decodedRequestObject}`);
             return;
         }
@@ -520,7 +524,7 @@ class DNSProxy {
     private handleRemoteSocketMessage(decodedResponseObject: dnsPacket.DNSPacket) {
         // logger.info(`remoteSocket message decodedResponseObject = ${stringifyPretty(decodedResponseObject)}`);
 
-        if (decodedResponseObject.id === undefined) {
+        if (!isNumber(decodedResponseObject.id)) {
             logger.warn(`handleRemoteSocketMessage invalid decodedResponseObject ${decodedResponseObject}`);
             return;
         }

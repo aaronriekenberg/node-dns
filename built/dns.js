@@ -50,8 +50,11 @@ const getNowSeconds = () => {
     now.setMilliseconds(0);
     return now.getTime() / 1000.;
 };
+const isNumber = (x) => {
+    return (typeof x === 'number');
+};
 const isPositiveNumber = (x) => {
-    return ((typeof x === 'number') && (x > 0));
+    return (isNumber(x) && (x > 0));
 };
 class RemoteInfo {
     constructor(udpSocket, udpRemoteInfo, tcpSocket) {
@@ -270,7 +273,7 @@ class DNSProxy {
     getMinTTLSecondsForResponse(response) {
         let minTTL;
         const processObject = (object) => {
-            if ((object.ttl === undefined) || (object.ttl < this.configuration.minTTLSeconds)) {
+            if ((!isNumber(object.ttl)) || (object.ttl < this.configuration.minTTLSeconds)) {
                 object.ttl = this.configuration.minTTLSeconds;
             }
             if (object.ttl > this.configuration.maxTTLSeconds) {
@@ -303,7 +306,7 @@ class DNSProxy {
             const secondsInCache = nowSeconds - cacheObject.cacheTimeSeconds;
             const adjustObject = (object) => {
                 const originalTTL = object[DNSProxy.originalTTLSymbol];
-                if (originalTTL === undefined) {
+                if (!isNumber(originalTTL)) {
                     valid = false;
                 }
                 else {
@@ -372,7 +375,7 @@ class DNSProxy {
     }
     handleServerSocketMessage(decodedRequestObject, clientRemoteInfo) {
         // logger.info(`serverSocket message remoteInfo = ${stringifyPretty(clientRemoteInfo)}\ndecodedRequestObject = ${stringifyPretty(decodedRequestObject)}`);
-        if ((decodedRequestObject.id === undefined) || (decodedRequestObject.questions === undefined)) {
+        if (!isNumber(decodedRequestObject.id)) {
             logger.warn(`handleServerSocketMessage invalid decodedRequestObject ${decodedRequestObject}`);
             return;
         }
@@ -418,7 +421,7 @@ class DNSProxy {
     }
     handleRemoteSocketMessage(decodedResponseObject) {
         // logger.info(`remoteSocket message decodedResponseObject = ${stringifyPretty(decodedResponseObject)}`);
-        if (decodedResponseObject.id === undefined) {
+        if (!isNumber(decodedResponseObject.id)) {
             logger.warn(`handleRemoteSocketMessage invalid decodedResponseObject ${decodedResponseObject}`);
             return;
         }
