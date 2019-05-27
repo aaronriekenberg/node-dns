@@ -161,14 +161,19 @@ const createTCPReadHandler = (messageCallback) => {
     };
 };
 class UDPRemoteServerConnection {
-    constructor(remoteAddressAndPort, messageCallback) {
+    constructor(remoteAddressAndPort, messageCallback, socketBufferSizes) {
         this.remoteAddressAndPort = remoteAddressAndPort;
         this.messageCallback = messageCallback;
+        this.socketBufferSizes = socketBufferSizes;
         this.socket = dgram.createSocket('udp4');
         this.socketListening = false;
         this.setupSocketEvents();
     }
     setupSocketEvents() {
+        if (this.socketBufferSizes) {
+            this.socket.setSendBufferSize(this.socketBufferSizes.sndbuf);
+            this.socket.setRecvBufferSize(this.socketBufferSizes.rcvbuf);
+        }
         this.socket.on('error', (err) => {
             logger.warn(`udp remote socket error remoteAddressAndPort=${stringify(this.remoteAddressAndPort)} ${formatError(err)}`);
             if (!this.socketListening) {
@@ -271,7 +276,7 @@ class DNSProxy {
         configuration.remoteAddressesAndPorts.forEach((remoteAddressAndPort) => {
             this.udpRemoteServerConnections.push(new UDPRemoteServerConnection(remoteAddressAndPort, (decodedMessage) => {
                 this.handleRemoteSocketMessage(decodedMessage);
-            }));
+            }, configuration.udpSocketBufferSizes));
             this.tcpRemoteServerConnections.push(new TCPRemoteServerConnection(configuration.tcpConnectionTimeoutSeconds * 1000, remoteAddressAndPort, (decodedMessage) => {
                 this.handleRemoteSocketMessage(decodedMessage);
             }));
@@ -495,6 +500,10 @@ class DNSProxy {
         }
     }
     setupSocketEvents() {
+        if (this.configuration.udpSocketBufferSizes) {
+            this.udpServerSocket.setSendBufferSize(this.configuration.udpSocketBufferSizes.sndbuf);
+            this.udpServerSocket.setRecvBufferSize(this.configuration.udpSocketBufferSizes.rcvbuf);
+        }
         let udpServerSocketListening = false;
         this.udpServerSocket.on('error', (err) => {
             logger.warn(`udpServerSocket error ${formatError(err)}`);

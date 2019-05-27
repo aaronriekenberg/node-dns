@@ -1,4 +1,8 @@
 {
+    "udpSocketBufferSizes": {
+        "sndbuf": 1048576,
+        "rcvbuf": 1048576
+    },
     "listenAddressAndPort": {
         "address": "192.168.1.1",
         "port": 10053

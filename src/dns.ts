@@ -54,12 +54,18 @@ const isPositiveNumber = (x: number | null | undefined): x is number => {
     return (isNumber(x) && (x > 0));
 };
 
+interface SocketBufferSizes {
+    readonly rcvbuf: number;
+    readonly sndbuf: number;
+}
+
 interface AddressAndPort {
     readonly address: string,
     readonly port: number
 }
 
 interface Configuration {
+    readonly udpSocketBufferSizes?: SocketBufferSizes;
     readonly listenAddressAndPort: AddressAndPort;
     readonly remoteAddressesAndPorts: AddressAndPort[];
     readonly minTTLSeconds: number;
@@ -200,11 +206,17 @@ class UDPRemoteServerConnection implements RemoteServerConnection {
 
     constructor(
         private readonly remoteAddressAndPort: AddressAndPort,
-        readonly messageCallback: (decodedMessage: dnsPacket.DNSPacket) => void) {
+        private readonly messageCallback: (decodedMessage: dnsPacket.DNSPacket) => void,
+        private readonly socketBufferSizes?: SocketBufferSizes) {
         this.setupSocketEvents();
     }
 
     private setupSocketEvents() {
+
+        if (this.socketBufferSizes) {
+            this.socket.setSendBufferSize(this.socketBufferSizes.sndbuf);
+            this.socket.setRecvBufferSize(this.socketBufferSizes.rcvbuf);
+        }
 
         this.socket.on('error', (err) => {
             logger.warn(`udp remote socket error remoteAddressAndPort=${stringify(this.remoteAddressAndPort)} ${formatError(err)}`);
@@ -342,7 +354,8 @@ class DNSProxy {
                     remoteAddressAndPort,
                     (decodedMessage) => {
                         this.handleRemoteSocketMessage(decodedMessage);
-                    }));
+                    },
+                    configuration.udpSocketBufferSizes));
             this.tcpRemoteServerConnections.push(
                 new TCPRemoteServerConnection(
                     configuration.tcpConnectionTimeoutSeconds * 1000,
@@ -648,6 +661,11 @@ class DNSProxy {
     }
 
     private setupSocketEvents() {
+
+        if (this.configuration.udpSocketBufferSizes) {
+            this.udpServerSocket.setSendBufferSize(this.configuration.udpSocketBufferSizes.sndbuf);
+            this.udpServerSocket.setRecvBufferSize(this.configuration.udpSocketBufferSizes.rcvbuf);
+        }
 
         let udpServerSocketListening = false;
         this.udpServerSocket.on('error', (err) => {
