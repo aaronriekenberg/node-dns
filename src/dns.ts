@@ -332,14 +332,14 @@ class DNSProxy {
 
         let minTTL: number | undefined;
 
-        const processObject = (object: { ttl?: number }) => {
+        const processObject = (object: { ttl?: number, [DNSProxy.originalTTLSymbol]?: number }) => {
             if ((object.ttl === undefined) || (object.ttl < this.configuration.minTTLSeconds)) {
                 object.ttl = this.configuration.minTTLSeconds;
             }
             if (object.ttl > this.configuration.maxTTLSeconds) {
                 object.ttl = this.configuration.maxTTLSeconds;
             }
-            (object as any)[DNSProxy.originalTTLSymbol] = object.ttl;
+            object[DNSProxy.originalTTLSymbol] = object.ttl;
             if ((minTTL === undefined) || (object.ttl < minTTL)) {
                 minTTL = object.ttl;
             }
@@ -372,10 +372,15 @@ class DNSProxy {
         } else {
             const secondsInCache = nowSeconds - cacheObject.cacheTimeSeconds;
 
-            const adjustObject = (object: { ttl?: number }) => {
-                object.ttl = (object as any)[DNSProxy.originalTTLSymbol] - secondsInCache;
-                if (object.ttl <= 0) {
+            const adjustObject = (object: { ttl?: number, [DNSProxy.originalTTLSymbol]?: number }) => {
+                const originalTTL = object[DNSProxy.originalTTLSymbol];
+                if (originalTTL === undefined) {
                     valid = false;
+                } else {
+                    object.ttl = originalTTL - secondsInCache;
+                    if (object.ttl <= 0) {
+                        valid = false;
+                    }
                 }
             };
 

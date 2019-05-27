@@ -302,9 +302,15 @@ class DNSProxy {
         else {
             const secondsInCache = nowSeconds - cacheObject.cacheTimeSeconds;
             const adjustObject = (object) => {
-                object.ttl = object[DNSProxy.originalTTLSymbol] - secondsInCache;
-                if (object.ttl <= 0) {
+                const originalTTL = object[DNSProxy.originalTTLSymbol];
+                if (originalTTL === undefined) {
                     valid = false;
+                }
+                else {
+                    object.ttl = originalTTL - secondsInCache;
+                    if (object.ttl <= 0) {
+                        valid = false;
+                    }
                 }
             };
             (cacheObject.decodedResponse.answers || []).forEach((answer) => {
