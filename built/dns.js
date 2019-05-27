@@ -303,10 +303,10 @@ class DNSProxy {
         return key;
     }
     getRandomDNSID() {
-        const getRandomInt = (min, max) => {
+        const getRandomIntInclusive = (min, max) => {
             return Math.floor(Math.random() * (max - min + 1)) + min;
         };
-        return getRandomInt(1, 65534);
+        return getRandomIntInclusive(1, 65534);
     }
     buildRemoteServerConnectionGetter(list) {
         let nextIndex = 0;

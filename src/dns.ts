@@ -398,10 +398,10 @@ class DNSProxy {
     }
 
     private getRandomDNSID(): number {
-        const getRandomInt = (min: number, max: number): number => {
-            return Math.floor(Math.random() * (max - min + 1)) + min
+        const getRandomIntInclusive = (min: number, max: number): number => {
+            return Math.floor(Math.random() * (max - min + 1)) + min;
         };
-        return getRandomInt(1, 65534);
+        return getRandomIntInclusive(1, 65534);
     }
 
     private buildRemoteServerConnectionGetter(list: RemoteServerConnection[]): () => RemoteServerConnection {
