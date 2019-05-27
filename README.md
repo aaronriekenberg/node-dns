@@ -22,6 +22,6 @@ Loosely based on [rebound](https://github.com/openbsd/src/blob/master/usr.sbin/r
 * Fixed responses
   * A list of 0 to N "fixedResponses" can be configured
   * Incoming requests that match a fixed response immediately return the configured response
-  * Useful for home network configurations to configure A records by hostname for example.
+  * Useful for home network configurations to configure A records by hostname for example
 * Configuration examples
   * https://github.com/aaronriekenberg/node-dns/tree/master/config
