@@ -1,8 +1,18 @@
 {
-    "serverAddress": "127.0.0.1",
-    "serverPort": 10053,
-    "remoteAddress": "8.8.8.8",
-    "remotePort": 53,
+    "listenAddressAndPort": {
+        "address": "127.0.0.1",
+        "port": 10053
+    },
+    "remoteAddressesAndPorts": [
+        {
+            "address": "8.8.8.8",
+            "port": 53
+        },
+        {
+            "address": "8.8.4.4",
+            "port": 53
+        }
+    ],
     "minTTLSeconds": 300,
     "maxTTLSeconds": 3600,
     "requestTimeoutSeconds": 10,

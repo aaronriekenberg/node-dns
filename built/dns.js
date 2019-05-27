@@ -160,15 +160,45 @@ const createTCPReadHandler = (messageCallback) => {
         }
     };
 };
+class UDPRemoteServerConnection {
+    constructor(remoteAddressAndPort, messageCallback) {
+        this.remoteAddressAndPort = remoteAddressAndPort;
+        this.messageCallback = messageCallback;
+        this.socket = dgram.createSocket('udp4');
+        this.socketListening = false;
+        this.setupSocketEvents();
+    }
+    setupSocketEvents() {
+        this.socket.on('error', (err) => {
+            logger.warn(`udp remote socket error remoteAddressAndPort=${stringify(this.remoteAddressAndPort)} ${formatError(err)}`);
+            if (!this.socketListening) {
+                throw new Error(`udp remote socket error remoteAddressAndPort=${stringify(this.remoteAddressAndPort)}`);
+            }
+        });
+        this.socket.on('listening', () => {
+            logger.info(`udpRemoteSocket listening on ${stringify(this.socket.address())} remoteAddressAndPort=${stringify(this.remoteAddressAndPort)}`);
+            this.socketListening = true;
+        });
+        this.socket.on('message', (message, remoteInfo) => {
+            this.messageCallback(dnsPacket.decode(message));
+        });
+        this.socket.bind();
+    }
+    writeRequest(dnsRequest) {
+        if (this.socketListening) {
+            const outgoingMessage = dnsPacket.encode(dnsRequest);
+            this.socket.send(outgoingMessage, 0, outgoingMessage.length, this.remoteAddressAndPort.port, this.remoteAddressAndPort.address);
+        }
+    }
+}
 class TCPRemoteServerConnection {
-    constructor(configuration, messageCallback) {
+    constructor(socketTimeoutMilliseconds, remoteAddressAndPort, messageCallback) {
+        this.socketTimeoutMilliseconds = socketTimeoutMilliseconds;
+        this.remoteAddressAndPort = remoteAddressAndPort;
         this.messageCallback = messageCallback;
         this.socket = null;
         this.connecting = false;
         this.requestBuffer = [];
-        this.socketTimeoutMilliseconds = configuration.tcpConnectionTimeoutSeconds * 1000;
-        this.remoteAddress = configuration.remoteAddress;
-        this.remotePort = configuration.remotePort;
     }
     writeRequest(dnsRequest) {
         this.createSocketIfNecessary();
@@ -186,7 +216,7 @@ class TCPRemoteServerConnection {
             const socket = new net.Socket();
             this.socket = socket;
             socket.on('error', (err) => {
-                logger.warn(`remote tcp client error ${formatError(err)}`);
+                logger.warn(`remote tcp client error remoteAddressAndPort=${stringify(this.remoteAddressAndPort)} ${formatError(err)}`);
                 socket.destroy();
             });
             socket.on('close', () => {
@@ -208,7 +238,7 @@ class TCPRemoteServerConnection {
                 });
                 this.requestBuffer = [];
             });
-            socket.connect(this.remotePort, this.remoteAddress);
+            socket.connect(this.remoteAddressAndPort.port, this.remoteAddressAndPort.address);
             this.connecting = true;
         }
     }
@@ -233,10 +263,18 @@ class DNSProxy {
         this.questionToResponse = new Map();
         this.questionToResponsePriorityQueue = new tinyqueue_1.default([], (a, b) => a.compareByExpirationTime(b));
         this.udpServerSocket = dgram.createSocket('udp4');
-        this.udpRemoteSocket = dgram.createSocket('udp4');
         this.tcpServerSocket = net.createServer();
-        this.tcpRemoteServerConnection = new TCPRemoteServerConnection(configuration, (decodedMessage) => {
-            this.handleRemoteSocketMessage(decodedMessage);
+        this.udpRemoteServerConnections = [];
+        this.tcpRemoteServerConnections = [];
+        this.getNextUDPRemoteServerConnection = this.buildRemoteServerConnectionGetter(this.udpRemoteServerConnections);
+        this.getNextTCPRemoteServerConnection = this.buildRemoteServerConnectionGetter(this.tcpRemoteServerConnections);
+        configuration.remoteAddressesAndPorts.forEach((remoteAddressAndPort) => {
+            this.udpRemoteServerConnections.push(new UDPRemoteServerConnection(remoteAddressAndPort, (decodedMessage) => {
+                this.handleRemoteSocketMessage(decodedMessage);
+            }));
+            this.tcpRemoteServerConnections.push(new TCPRemoteServerConnection(configuration.tcpConnectionTimeoutSeconds * 1000, remoteAddressAndPort, (decodedMessage) => {
+                this.handleRemoteSocketMessage(decodedMessage);
+            }));
         });
     }
     getQuestionCacheKey(questions) {
@@ -259,6 +297,17 @@ class DNSProxy {
             return Math.floor(Math.random() * (max - min + 1)) + min;
         };
         return getRandomInt(1, 65534);
+    }
+    buildRemoteServerConnectionGetter(list) {
+        let nextIndex = 0;
+        return () => {
+            if (nextIndex >= list.length) {
+                nextIndex = 0;
+            }
+            const retVal = list[nextIndex];
+            ++nextIndex;
+            return retVal;
+        };
     }
     buildFixedResponses() {
         (this.configuration.fixedResponses || []).forEach((fixedResponse) => {
@@ -398,12 +447,11 @@ class DNSProxy {
             decodedRequestObject.id = outgoingRequestID;
             if (clientRemoteInfo.isUDP) {
                 ++this.metrics.remoteUDPRequests;
-                const outgoingMessage = dnsPacket.encode(decodedRequestObject);
-                this.udpRemoteSocket.send(outgoingMessage, 0, outgoingMessage.length, this.configuration.remotePort, this.configuration.remoteAddress);
+                this.getNextUDPRemoteServerConnection().writeRequest(decodedRequestObject);
             }
             else {
                 ++this.metrics.remoteTCPRequests;
-                this.tcpRemoteServerConnection.writeRequest(decodedRequestObject);
+                this.getNextTCPRemoteServerConnection().writeRequest(decodedRequestObject);
             }
         }
     }
@@ -462,17 +510,7 @@ class DNSProxy {
             const decodedMessage = dnsPacket.decode(message);
             this.handleServerSocketMessage(decodedMessage, RemoteInfo.createUDP(this.udpServerSocket, remoteInfo));
         });
-        this.udpRemoteSocket.on('error', (err) => {
-            logger.warn(`udpRemoteSocket error ${formatError(err)}`);
-        });
-        this.udpRemoteSocket.on('listening', () => {
-            logger.info(`udpRemoteSocket listening on ${stringify(this.udpRemoteSocket.address())}`);
-            this.udpServerSocket.bind(this.configuration.serverPort, this.configuration.serverAddress);
-        });
-        this.udpRemoteSocket.on('message', (message, remoteInfo) => {
-            this.handleRemoteSocketMessage(dnsPacket.decode(message));
-        });
-        this.udpRemoteSocket.bind();
+        this.udpServerSocket.bind(this.configuration.listenAddressAndPort.port, this.configuration.listenAddressAndPort.address);
         let tcpServerSocketListening = false;
         this.tcpServerSocket.on('error', (err) => {
             logger.warn(`tcpServerSocket error ${formatError(err)}`);
@@ -499,7 +537,7 @@ class DNSProxy {
             });
             connection.setTimeout(this.configuration.tcpConnectionTimeoutSeconds * 1000);
         });
-        this.tcpServerSocket.listen(this.configuration.serverPort, this.configuration.serverAddress);
+        this.tcpServerSocket.listen(this.configuration.listenAddressAndPort.port, this.configuration.listenAddressAndPort.address);
     }
     start() {
         logger.info('begin start');
