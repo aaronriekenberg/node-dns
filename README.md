@@ -19,6 +19,7 @@ Loosely based on [rebound](https://github.com/openbsd/src/blob/master/usr.sbin/r
   * Responses that contain rcode NOERROR or NXDOMAIN are cached based on their TTL
   * TTL is clamped between configurable minimum and maximum
   * Response is cached by question (converted to string) until TTL expires
+  * TTL is adjusted based on age for responses served from cache
 * Fixed responses
   * A list of 0 to N "fixedResponses" can be configured
   * Incoming requests that match a fixed response immediately return the configured response
