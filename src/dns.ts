@@ -213,11 +213,6 @@ class UDPRemoteServerConnection implements RemoteServerConnection {
 
     private setupSocketEvents() {
 
-        if (this.socketBufferSizes) {
-            this.socket.setSendBufferSize(this.socketBufferSizes.sndbuf);
-            this.socket.setRecvBufferSize(this.socketBufferSizes.rcvbuf);
-        }
-
         this.socket.on('error', (err) => {
             logger.warn(`udp remote socket error remoteAddressAndPort=${stringify(this.remoteAddressAndPort)} ${formatError(err)}`);
             if (!this.socketListening) {
@@ -226,8 +221,15 @@ class UDPRemoteServerConnection implements RemoteServerConnection {
         });
 
         this.socket.on('listening', () => {
-            logger.info(`udpRemoteSocket listening on ${stringify(this.socket.address())} remoteAddressAndPort=${stringify(this.remoteAddressAndPort)} rcvbuf=${this.socket.getRecvBufferSize()} sndbuf=${this.socket.getSendBufferSize()}`);
+
             this.socketListening = true;
+
+            if (this.socketBufferSizes) {
+                this.socket.setSendBufferSize(this.socketBufferSizes.sndbuf);
+                this.socket.setRecvBufferSize(this.socketBufferSizes.rcvbuf);
+            }
+
+            logger.info(`udpRemoteSocket listening on ${stringify(this.socket.address())} remoteAddressAndPort=${stringify(this.remoteAddressAndPort)} rcvbuf=${this.socket.getRecvBufferSize()} sndbuf=${this.socket.getSendBufferSize()}`);
         });
 
         this.socket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
@@ -662,11 +664,6 @@ class DNSProxy {
 
     private setupSocketEvents() {
 
-        if (this.configuration.udpSocketBufferSizes) {
-            this.udpServerSocket.setSendBufferSize(this.configuration.udpSocketBufferSizes.sndbuf);
-            this.udpServerSocket.setRecvBufferSize(this.configuration.udpSocketBufferSizes.rcvbuf);
-        }
-
         let udpServerSocketListening = false;
         this.udpServerSocket.on('error', (err) => {
             logger.warn(`udpServerSocket error ${formatError(err)}`);
@@ -676,7 +673,14 @@ class DNSProxy {
         });
 
         this.udpServerSocket.on('listening', () => {
+
             udpServerSocketListening = true;
+
+            if (this.configuration.udpSocketBufferSizes) {
+                this.udpServerSocket.setSendBufferSize(this.configuration.udpSocketBufferSizes.sndbuf);
+                this.udpServerSocket.setRecvBufferSize(this.configuration.udpSocketBufferSizes.rcvbuf);
+            }
+
             logger.info(`udpServerSocket listening on ${stringify(this.udpServerSocket.address())} rcvbuf=${this.udpServerSocket.getRecvBufferSize()} sndbuf=${this.udpServerSocket.getSendBufferSize()}`);
         });
 
