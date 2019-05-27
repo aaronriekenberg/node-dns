@@ -10,6 +10,10 @@ export interface DNSAnswer {
     ttl?: number;
 }
 
+export interface DNSAuthority {
+    ttl?: number;
+}
+
 export interface DNSQuestion {
     name?: string;
     type?: string;
@@ -21,6 +25,7 @@ export interface DNSPacket {
     rcode?: string;
     questions?: DNSQuestion[];
     answers?: DNSAnswer[];
+    authorities?: DNSAuthority[];
 }
 
 export namespace a {

@@ -50,7 +50,9 @@ const getNowSeconds = () => {
     now.setMilliseconds(0);
     return now.getTime() / 1000.;
 };
-;
+const isPositiveNumber = (x) => {
+    return ((typeof x === 'number') && (x > 0));
+};
 class RemoteInfo {
     constructor(udpSocket, udpRemoteInfo, tcpSocket) {
         this.udpSocket = udpSocket;
@@ -78,7 +80,6 @@ class RemoteInfo {
         return ((this.udpSocket !== null) && (this.udpRemoteInfo !== null));
     }
 }
-;
 class OutgoingRequestInfo {
     constructor(outgoingRequestID, clientRemoteInfo, clientRequestID, expirationTimeSeconds, requestQuestionCacheKey) {
         this.outgoingRequestID = outgoingRequestID;
@@ -102,7 +103,6 @@ class OutgoingRequestInfo {
         }
     }
 }
-;
 class CacheObject {
     constructor(questionCacheKey, decodedResponse, cacheTimeSeconds, expirationTimeSeconds) {
         this.questionCacheKey = questionCacheKey;
@@ -125,7 +125,6 @@ class CacheObject {
         }
     }
 }
-;
 const createTCPReadHandler = (messageCallback) => {
     let readingHeader = true;
     let buffer = Buffer.of();
@@ -211,20 +210,25 @@ class TCPRemoteServerConnection {
         }
     }
 }
-;
+class Metrics {
+    constructor() {
+        this.cacheHits = 0;
+        this.cacheMisses = 0;
+        this.fixedResponses = 0;
+        this.remoteUDPRequests = 0;
+        this.remoteTCPRequests = 0;
+        this.responseQuestionCacheKeyMismatch = 0;
+    }
+}
 class DNSProxy {
     constructor(configuration) {
         this.configuration = configuration;
+        this.metrics = new Metrics();
         this.outgoingIDToRequestInfo = new Map();
         this.outgoingRequestInfoPriorityQueue = new tinyqueue_1.default([], (a, b) => a.compareByExpirationTime(b));
         this.questionToFixedResponse = new Map();
         this.questionToResponse = new Map();
         this.questionToResponsePriorityQueue = new tinyqueue_1.default([], (a, b) => a.compareByExpirationTime(b));
-        this.fixedResponses = 0;
-        this.cacheHits = 0;
-        this.cacheMisses = 0;
-        this.remoteUDPRequests = 0;
-        this.remoteTCPRequests = 0;
         this.udpServerSocket = dgram.createSocket('udp4');
         this.udpRemoteSocket = dgram.createSocket('udp4');
         this.tcpServerSocket = net.createServer();
@@ -263,9 +267,9 @@ class DNSProxy {
         });
         logger.info(`questionToFixedResponse.size = ${this.questionToFixedResponse.size}`);
     }
-    getMinTTLSecondsForAnswers(answers) {
+    getMinTTLSecondsForResponse(response) {
         let minTTL;
-        (answers || []).forEach((answer) => {
+        (response.answers || []).forEach((answer) => {
             if ((answer.ttl === undefined) || (answer.ttl < this.configuration.minTTLSeconds)) {
                 answer.ttl = this.configuration.minTTLSeconds;
             }
@@ -275,6 +279,18 @@ class DNSProxy {
             answer[DNSProxy.originalTTLSymbol] = answer.ttl;
             if ((minTTL === undefined) || (answer.ttl < minTTL)) {
                 minTTL = answer.ttl;
+            }
+        });
+        (response.authorities || []).forEach((authority) => {
+            if ((authority.ttl === undefined) || (authority.ttl < this.configuration.minTTLSeconds)) {
+                authority.ttl = this.configuration.minTTLSeconds;
+            }
+            if (authority.ttl > this.configuration.maxTTLSeconds) {
+                authority.ttl = this.configuration.maxTTLSeconds;
+            }
+            authority[DNSProxy.originalTTLSymbol] = authority.ttl;
+            if ((minTTL === undefined) || (authority.ttl < minTTL)) {
+                minTTL = authority.ttl;
             }
         });
         return minTTL;
@@ -291,6 +307,12 @@ class DNSProxy {
             (cacheObject.decodedResponse.answers || []).forEach((answer) => {
                 answer.ttl = answer[DNSProxy.originalTTLSymbol] - secondsInCache;
                 if (answer.ttl <= 0) {
+                    valid = false;
+                }
+            });
+            (cacheObject.decodedResponse.authorities || []).forEach((authority) => {
+                authority.ttl = authority[DNSProxy.originalTTLSymbol] - secondsInCache;
+                if (authority.ttl <= 0) {
                     valid = false;
                 }
             });
@@ -331,20 +353,16 @@ class DNSProxy {
                 done = true;
             }
         }
-        const metrics = {
-            cacheHits: this.cacheHits,
-            cacheMisses: this.cacheMisses,
-            fixedResponses: this.fixedResponses,
+        const logData = {
+            metrics: this.metrics,
             expiredOutgoingIDs,
             outgoingIDToRequestInfo: this.outgoingIDToRequestInfo.size,
             outgoingRequestInfoPriorityQueue: this.outgoingRequestInfoPriorityQueue.length,
             expiredQuestionCacheKeys,
             questionToResponse: this.questionToResponse.size,
-            questionToResponsePriorityQueue: this.questionToResponsePriorityQueue.length,
-            remoteUDPRequests: this.remoteUDPRequests,
-            remoteTCPRequests: this.remoteTCPRequests
+            questionToResponsePriorityQueue: this.questionToResponsePriorityQueue.length
         };
-        logger.info(`end timer pop ${stringify(metrics)}`);
+        logger.info(`end timer pop ${stringify(logData)}`);
     }
     handleServerSocketMessage(decodedRequestObject, clientRemoteInfo) {
         // logger.info(`serverSocket message remoteInfo = ${stringifyPretty(clientRemoteInfo)}\ndecodedRequestObject = ${stringifyPretty(decodedRequestObject)}`);
@@ -360,7 +378,7 @@ class DNSProxy {
                 fixedResponse.id = decodedRequestObject.id;
                 clientRemoteInfo.writeResponse(fixedResponse);
                 responded = true;
-                ++this.fixedResponses;
+                ++this.metrics.fixedResponses;
             }
         }
         if ((!responded) && questionCacheKey) {
@@ -370,11 +388,11 @@ class DNSProxy {
                 cachedResponse.id = decodedRequestObject.id;
                 clientRemoteInfo.writeResponse(cachedResponse);
                 responded = true;
-                ++this.cacheHits;
+                ++this.metrics.cacheHits;
             }
         }
         if (!responded) {
-            ++this.cacheMisses;
+            ++this.metrics.cacheMisses;
             const outgoingRequestID = this.getRandomDNSID();
             const expirationTimeSeconds = getNowSeconds() + this.configuration.requestTimeoutSeconds;
             const outgoingRequestInfo = new OutgoingRequestInfo(outgoingRequestID, clientRemoteInfo, decodedRequestObject.id, expirationTimeSeconds, questionCacheKey);
@@ -382,29 +400,31 @@ class DNSProxy {
             this.outgoingIDToRequestInfo.set(outgoingRequestID, outgoingRequestInfo);
             decodedRequestObject.id = outgoingRequestID;
             if (clientRemoteInfo.isUDP) {
-                ++this.remoteUDPRequests;
+                ++this.metrics.remoteUDPRequests;
                 const outgoingMessage = dnsPacket.encode(decodedRequestObject);
                 this.udpRemoteSocket.send(outgoingMessage, 0, outgoingMessage.length, this.configuration.remotePort, this.configuration.remoteAddress);
             }
             else {
-                ++this.remoteTCPRequests;
+                ++this.metrics.remoteTCPRequests;
                 this.tcpRemoteServerConnection.writeRequest(decodedRequestObject);
             }
         }
     }
     handleRemoteSocketMessage(decodedResponseObject) {
-        // logger.info(`remoteSocket message decodedResponse = ${stringifyPretty(decodedResponse)}`);
+        // logger.info(`remoteSocket message decodedResponseObject = ${stringifyPretty(decodedResponseObject)}`);
         if (decodedResponseObject.id === undefined) {
             logger.warn(`handleRemoteSocketMessage invalid decodedResponseObject ${decodedResponseObject}`);
             return;
         }
         let responseQuestionCacheKey;
-        if (decodedResponseObject.rcode === 'NOERROR') {
-            const minTTLSeconds = this.getMinTTLSecondsForAnswers(decodedResponseObject.answers);
-            if ((minTTLSeconds !== undefined) && (minTTLSeconds > 0)) {
+        let minTTLSeconds;
+        const nowSeconds = getNowSeconds();
+        if ((decodedResponseObject.rcode === 'NOERROR') ||
+            (decodedResponseObject.rcode === 'NXDOMAIN')) {
+            minTTLSeconds = this.getMinTTLSecondsForResponse(decodedResponseObject);
+            if (isPositiveNumber(minTTLSeconds)) {
                 responseQuestionCacheKey = this.getQuestionCacheKey(decodedResponseObject.questions);
                 if (responseQuestionCacheKey) {
-                    const nowSeconds = getNowSeconds();
                     const expirationTimeSeconds = nowSeconds + minTTLSeconds;
                     const cacheObject = new CacheObject(responseQuestionCacheKey, decodedResponseObject, nowSeconds, expirationTimeSeconds);
                     this.questionToResponsePriorityQueue.push(cacheObject);
@@ -415,8 +435,14 @@ class DNSProxy {
         const clientRequestInfo = this.outgoingIDToRequestInfo.get(decodedResponseObject.id);
         if (clientRequestInfo) {
             this.outgoingIDToRequestInfo.delete(decodedResponseObject.id);
-            if (clientRequestInfo.requestQuestionCacheKey !== responseQuestionCacheKey) {
-                logger.warn(`clientRequestInfo.requestQuestionCacheKey !== responseQuestionCacheKey requestQuestionCacheKey=${clientRequestInfo.requestQuestionCacheKey} responseQuestionCacheKey=${responseQuestionCacheKey}`);
+            if (clientRequestInfo.requestQuestionCacheKey &&
+                (clientRequestInfo.requestQuestionCacheKey !== responseQuestionCacheKey) &&
+                isPositiveNumber(minTTLSeconds)) {
+                ++this.metrics.responseQuestionCacheKeyMismatch;
+                const expirationTimeSeconds = nowSeconds + minTTLSeconds;
+                const cacheObject = new CacheObject(clientRequestInfo.requestQuestionCacheKey, decodedResponseObject, nowSeconds, expirationTimeSeconds);
+                this.questionToResponsePriorityQueue.push(cacheObject);
+                this.questionToResponse.set(clientRequestInfo.requestQuestionCacheKey, cacheObject);
             }
             decodedResponseObject.id = clientRequestInfo.clientRequestID;
             const clientRemoteInfo = clientRequestInfo.clientRemoteInfo;

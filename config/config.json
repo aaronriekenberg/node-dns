@@ -4,7 +4,7 @@
     "remoteAddress": "8.8.8.8",
     "remotePort": 53,
     "minTTLSeconds": 300,
-    "maxTTLSeconds": 86400,
+    "maxTTLSeconds": 3600,
     "requestTimeoutSeconds": 10,
     "tcpConnectionTimeoutSeconds": 5,
     "timerIntervalSeconds": 10,
