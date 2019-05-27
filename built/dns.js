@@ -281,6 +281,18 @@ class DNSProxy {
                 minTTL = answer.ttl;
             }
         });
+        (response.additionals || []).forEach((additional) => {
+            if ((additional.ttl === undefined) || (additional.ttl < this.configuration.minTTLSeconds)) {
+                additional.ttl = this.configuration.minTTLSeconds;
+            }
+            if (additional.ttl > this.configuration.maxTTLSeconds) {
+                additional.ttl = this.configuration.maxTTLSeconds;
+            }
+            additional[DNSProxy.originalTTLSymbol] = additional.ttl;
+            if ((minTTL === undefined) || (additional.ttl < minTTL)) {
+                minTTL = additional.ttl;
+            }
+        });
         (response.authorities || []).forEach((authority) => {
             if ((authority.ttl === undefined) || (authority.ttl < this.configuration.minTTLSeconds)) {
                 authority.ttl = this.configuration.minTTLSeconds;
@@ -307,6 +319,12 @@ class DNSProxy {
             (cacheObject.decodedResponse.answers || []).forEach((answer) => {
                 answer.ttl = answer[DNSProxy.originalTTLSymbol] - secondsInCache;
                 if (answer.ttl <= 0) {
+                    valid = false;
+                }
+            });
+            (cacheObject.decodedResponse.additionals || []).forEach((additional) => {
+                additional.ttl = additional[DNSProxy.originalTTLSymbol] - secondsInCache;
+                if (additional.ttl <= 0) {
                     valid = false;
                 }
             });
