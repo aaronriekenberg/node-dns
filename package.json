@@ -9,10 +9,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@types/node": "^12.0.2",
+    "@types/node": "^12.0.3",
     "dns-packet": "^5.2.1",
     "tinyqueue": "^2.0.2",
-    "typescript": "^3.4.5",
+    "typescript": "^3.5.1",
     "winston": "^3.2.1"
   }
 }
