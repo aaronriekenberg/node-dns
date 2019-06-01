@@ -618,19 +618,19 @@ class DNSProxy {
             return;
         }
 
-        const responseQuestionCacheKey = this.getQuestionCacheKey(decodedResponseObject.questions);
-
         const clientRequestInfo = this.outgoingIDToRequestInfo.get(decodedResponseObject.id);
         if (!clientRequestInfo) {
             return;
         }
 
-        this.outgoingIDToRequestInfo.delete(decodedResponseObject.id);
+        const responseQuestionCacheKey = this.getQuestionCacheKey(decodedResponseObject.questions);
 
         if (responseQuestionCacheKey !== clientRequestInfo.questionCacheKey) {
             ++this.metrics.responseQuestionCacheKeyMismatch;
             return;
         }
+
+        this.outgoingIDToRequestInfo.delete(decodedResponseObject.id);
 
         if ((decodedResponseObject.rcode === 'NOERROR') ||
             (decodedResponseObject.rcode === 'NXDOMAIN')) {
