@@ -383,7 +383,7 @@ class DNSProxy {
     }
 
     private getQuestionCacheKey(questions?: dnsPacket.DNSQuestion[]): string {
-        let key: string = "";
+        let key: string = '';
         let firstQuestion = true;
 
         (questions || []).forEach((question) => {

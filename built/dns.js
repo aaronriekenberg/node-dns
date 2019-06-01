@@ -291,7 +291,7 @@ class DNSProxy {
         });
     }
     getQuestionCacheKey(questions) {
-        let key = "";
+        let key = '';
         let firstQuestion = true;
         (questions || []).forEach((question) => {
             if (!firstQuestion) {
