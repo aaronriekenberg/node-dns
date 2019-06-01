@@ -614,7 +614,7 @@ class DNSProxy {
             return;
         }
 
-        let responseQuestionCacheKey = this.getQuestionCacheKey(decodedResponseObject.questions);
+        const responseQuestionCacheKey = this.getQuestionCacheKey(decodedResponseObject.questions);
 
         const clientRequestInfo = this.outgoingIDToRequestInfo.get(decodedResponseObject.id);
         if (!clientRequestInfo) {
