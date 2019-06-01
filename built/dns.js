@@ -382,11 +382,15 @@ class DNSProxy {
         done = false;
         let expiredOutgoingIDs = 0;
         while ((this.outgoingRequestInfoPriorityQueue.length > 0) && (!done)) {
-            const outgoingRequestInfo = this.outgoingRequestInfoPriorityQueue.peek();
-            if (outgoingRequestInfo && outgoingRequestInfo.expired(nowSeconds)) {
+            const queueRequestInfo = this.outgoingRequestInfoPriorityQueue.peek();
+            if (queueRequestInfo && queueRequestInfo.expired(nowSeconds)) {
                 this.outgoingRequestInfoPriorityQueue.pop();
-                this.outgoingIDToRequestInfo.delete(outgoingRequestInfo.outgoingRequestID);
-                ++expiredOutgoingIDs;
+                const mapRequestInfo = this.outgoingIDToRequestInfo.get(queueRequestInfo.outgoingRequestID);
+                // validate expired request object has not been re-added to map
+                if (mapRequestInfo && mapRequestInfo.expired(nowSeconds)) {
+                    this.outgoingIDToRequestInfo.delete(mapRequestInfo.outgoingRequestID);
+                    ++expiredOutgoingIDs;
+                }
             }
             else {
                 done = true;
