@@ -54,6 +54,73 @@ const isPositiveNumber = (x: number | null | undefined): x is number => {
     return (isNumber(x) && (x > 0));
 };
 
+interface CacheValue<K> {
+    expired(nowSeconds: number): boolean;
+
+    getExpirationTimeSeconds(): number;
+
+    getCacheKey(): K
+}
+
+class ExpiringCache<K, V extends CacheValue<K>> {
+
+    private readonly map = new Map<K, V>();
+
+    private readonly priorityQueue = new TinyQueue<V>([], (a: V, b: V) => {
+        if (a.getExpirationTimeSeconds() < b.getExpirationTimeSeconds()) {
+            return -1;
+        } else if (a.getExpirationTimeSeconds() === b.getExpirationTimeSeconds()) {
+            return 0;
+        } else {
+            return 1;
+        }
+    });
+
+    add(key: K, value: V) {
+        this.map.set(key, value);
+        this.priorityQueue.push(value);
+    }
+
+    get(key: K): V | undefined {
+        return this.map.get(key);
+    }
+
+    delete(key: K) {
+        this.map.delete(key);
+    }
+
+    periodicCleanUp(nowSeconds: number): number {
+        let expiredEntries = 0;
+
+        let done = false;
+        while ((this.priorityQueue.length > 0) && (!done)) {
+            const queueObject = this.priorityQueue.peek();
+            if (queueObject && queueObject.expired(nowSeconds)) {
+                this.priorityQueue.pop();
+                const mapObject = this.map.get(queueObject.getCacheKey());
+                // validate expired cache object has not been re-added to map
+                if (mapObject && mapObject.expired(nowSeconds)) {
+                    this.map.delete(mapObject.getCacheKey());
+                    ++expiredEntries;
+                }
+            } else {
+                done = true;
+            }
+        }
+
+        return expiredEntries;
+    }
+
+    get mapSize(): number {
+        return this.map.size;
+    }
+
+    get queueSize(): number {
+        return this.priorityQueue.length;
+    }
+
+}
+
 interface SocketBufferSizes {
     readonly rcvbuf: number;
     readonly sndbuf: number;
@@ -111,7 +178,7 @@ class ClientRemoteInfo {
     }
 }
 
-class OutgoingRequestInfo {
+class OutgoingRequestInfo implements CacheValue<number> {
 
     constructor(
         readonly outgoingRequestID: number,
@@ -126,18 +193,16 @@ class OutgoingRequestInfo {
         return nowSeconds >= this.expirationTimeSeconds;
     }
 
-    compareByExpirationTime(other: OutgoingRequestInfo): number {
-        if (this.expirationTimeSeconds < other.expirationTimeSeconds) {
-            return -1;
-        } else if (this.expirationTimeSeconds === other.expirationTimeSeconds) {
-            return 0;
-        } else {
-            return 1;
-        }
+    getExpirationTimeSeconds(): number {
+        return this.expirationTimeSeconds;
+    }
+
+    getCacheKey(): number {
+        return this.outgoingRequestID;
     }
 }
 
-class CacheObject {
+class CacheObject implements CacheValue<String> {
 
     constructor(
         readonly questionCacheKey: string,
@@ -151,14 +216,12 @@ class CacheObject {
         return nowSeconds >= this.expirationTimeSeconds;
     }
 
-    compareByExpirationTime(other: CacheObject): number {
-        if (this.expirationTimeSeconds < other.expirationTimeSeconds) {
-            return -1;
-        } else if (this.expirationTimeSeconds === other.expirationTimeSeconds) {
-            return 0;
-        } else {
-            return 1;
-        }
+    getExpirationTimeSeconds(): number {
+        return this.expirationTimeSeconds;
+    }
+
+    getCacheKey(): string {
+        return this.questionCacheKey;
     }
 }
 
@@ -345,13 +408,11 @@ class DNSProxy {
 
     private readonly metrics = new Metrics();
 
-    private readonly outgoingIDToRequestInfo = new Map<number, OutgoingRequestInfo>();
-    private readonly outgoingRequestInfoPriorityQueue = new TinyQueue<OutgoingRequestInfo>([], (a: OutgoingRequestInfo, b: OutgoingRequestInfo) => a.compareByExpirationTime(b));
-
     private readonly questionToFixedResponse = new Map<string, dnsPacket.DNSPacket>();
 
-    private readonly questionToResponse = new Map<string, CacheObject>();
-    private readonly questionToResponsePriorityQueue = new TinyQueue<CacheObject>([], (a: CacheObject, b: CacheObject) => a.compareByExpirationTime(b));
+    private readonly outgoingRequestCache = new ExpiringCache<number, OutgoingRequestInfo>();
+
+    private readonly questionToResponseCache = new ExpiringCache<string, CacheObject>();
 
     private readonly udpServerSocket: dgram.Socket;
 
@@ -492,50 +553,19 @@ class DNSProxy {
         logger.info('begin timer pop');
 
         const nowSeconds = getNowSeconds();
-        let done: boolean;
 
-        done = false;
-        let expiredOutgoingIDs = 0;
-        while ((this.outgoingRequestInfoPriorityQueue.length > 0) && (!done)) {
-            const queueRequestInfo = this.outgoingRequestInfoPriorityQueue.peek();
-            if (queueRequestInfo && queueRequestInfo.expired(nowSeconds)) {
-                this.outgoingRequestInfoPriorityQueue.pop();
-                const mapRequestInfo = this.outgoingIDToRequestInfo.get(queueRequestInfo.outgoingRequestID);
-                // validate expired request object has not been re-added to map
-                if (mapRequestInfo && mapRequestInfo.expired(nowSeconds)) {
-                    this.outgoingIDToRequestInfo.delete(mapRequestInfo.outgoingRequestID);
-                    ++expiredOutgoingIDs;
-                }
-            } else {
-                done = true;
-            }
-        }
+        const expiredOutgoingIDs = this.outgoingRequestCache.periodicCleanUp(nowSeconds);
 
-        done = false;
-        let expiredQuestionCacheKeys = 0;
-        while ((this.questionToResponsePriorityQueue.length > 0) && (!done)) {
-            const queueCacheObject = this.questionToResponsePriorityQueue.peek();
-            if (queueCacheObject && queueCacheObject.expired(nowSeconds)) {
-                this.questionToResponsePriorityQueue.pop();
-                const mapCacheObject = this.questionToResponse.get(queueCacheObject.questionCacheKey);
-                // validate expired cache object has not been re-added to map
-                if (mapCacheObject && mapCacheObject.expired(nowSeconds)) {
-                    this.questionToResponse.delete(mapCacheObject.questionCacheKey);
-                    ++expiredQuestionCacheKeys;
-                }
-            } else {
-                done = true;
-            }
-        }
+        const expiredQuestionCacheKeys = this.questionToResponseCache.periodicCleanUp(nowSeconds);
 
         const logData = {
             metrics: this.metrics,
             expiredOutgoingIDs,
-            outgoingIDToRequestInfo: this.outgoingIDToRequestInfo.size,
-            outgoingRequestInfoPriorityQueue: this.outgoingRequestInfoPriorityQueue.length,
+            outgoingRequestMapSize: this.outgoingRequestCache.mapSize,
+            outgoingRequestQueueSize: this.outgoingRequestCache.queueSize,
             expiredQuestionCacheKeys,
-            questionToResponse: this.questionToResponse.size,
-            questionToResponsePriorityQueue: this.questionToResponsePriorityQueue.length
+            questionToResponseMapSize: this.questionToResponseCache.mapSize,
+            questionToResponseQueueSize: this.questionToResponseCache.queueSize
         };
 
         logger.info(`end timer pop ${stringify(logData)}`);
@@ -567,7 +597,7 @@ class DNSProxy {
         }
 
         if (!responded) {
-            const cacheObject = this.questionToResponse.get(questionCacheKey);
+            const cacheObject = this.questionToResponseCache.get(questionCacheKey);
             if (cacheObject && this.adjustTTL(cacheObject)) {
                 const cachedResponse = cacheObject.decodedResponse;
                 cachedResponse.id = decodedRequestObject.id;
@@ -595,8 +625,7 @@ class DNSProxy {
                     expirationTimeSeconds,
                     questionCacheKey);
 
-            this.outgoingRequestInfoPriorityQueue.push(outgoingRequestInfo);
-            this.outgoingIDToRequestInfo.set(outgoingRequestID, outgoingRequestInfo);
+            this.outgoingRequestCache.add(outgoingRequestID, outgoingRequestInfo);
 
             decodedRequestObject.id = outgoingRequestID;
 
@@ -618,7 +647,7 @@ class DNSProxy {
             return;
         }
 
-        const clientRequestInfo = this.outgoingIDToRequestInfo.get(decodedResponseObject.id);
+        const clientRequestInfo = this.outgoingRequestCache.get(decodedResponseObject.id);
         if (!clientRequestInfo) {
             return;
         }
@@ -630,7 +659,7 @@ class DNSProxy {
             return;
         }
 
-        this.outgoingIDToRequestInfo.delete(decodedResponseObject.id);
+        this.outgoingRequestCache.delete(decodedResponseObject.id);
 
         if ((decodedResponseObject.rcode === 'NOERROR') ||
             (decodedResponseObject.rcode === 'NXDOMAIN')) {
@@ -649,8 +678,7 @@ class DNSProxy {
                     nowSeconds,
                     expirationTimeSeconds);
 
-                this.questionToResponsePriorityQueue.push(cacheObject);
-                this.questionToResponse.set(clientRequestInfo.questionCacheKey, cacheObject);
+                this.questionToResponseCache.add(clientRequestInfo.questionCacheKey, cacheObject);
             }
         }
 
