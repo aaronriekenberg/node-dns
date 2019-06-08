@@ -80,39 +80,19 @@ class ClientRemoteInfo {
         return ((this.udpSocket !== null) && (this.udpRemoteInfo !== null));
     }
 }
-class OutgoingRequestInfo {
-    constructor(outgoingRequestID, clientRemoteInfo, clientRequestID, expirationTimeSeconds, questionCacheKey) {
-        this.outgoingRequestID = outgoingRequestID;
+class OutgoingRequestInfo extends expiring_cache_1.DefaultExpiringCacheValue {
+    constructor(outgoingRequestID, expirationTimeSeconds, clientRemoteInfo, clientRequestID, questionCacheKey) {
+        super(outgoingRequestID, expirationTimeSeconds);
         this.clientRemoteInfo = clientRemoteInfo;
         this.clientRequestID = clientRequestID;
-        this.expirationTimeSeconds = expirationTimeSeconds;
         this.questionCacheKey = questionCacheKey;
-    }
-    expired(nowSeconds) {
-        return nowSeconds >= this.expirationTimeSeconds;
-    }
-    getExpirationTimeSeconds() {
-        return this.expirationTimeSeconds;
-    }
-    getCacheKey() {
-        return this.outgoingRequestID;
     }
 }
-class CacheObject {
-    constructor(questionCacheKey, decodedResponse, cacheTimeSeconds, expirationTimeSeconds) {
-        this.questionCacheKey = questionCacheKey;
+class CacheObject extends expiring_cache_1.DefaultExpiringCacheValue {
+    constructor(questionCacheKey, expirationTimeSeconds, decodedResponse, cacheTimeSeconds) {
+        super(questionCacheKey, expirationTimeSeconds);
         this.decodedResponse = decodedResponse;
         this.cacheTimeSeconds = cacheTimeSeconds;
-        this.expirationTimeSeconds = expirationTimeSeconds;
-    }
-    expired(nowSeconds) {
-        return nowSeconds >= this.expirationTimeSeconds;
-    }
-    getExpirationTimeSeconds() {
-        return this.expirationTimeSeconds;
-    }
-    getCacheKey() {
-        return this.questionCacheKey;
     }
 }
 const createTCPReadHandler = (messageCallback) => {
@@ -407,7 +387,7 @@ class DNSProxy {
             ++this.metrics.cacheMisses;
             const outgoingRequestID = this.getRandomDNSID();
             const expirationTimeSeconds = getNowSeconds() + this.configuration.requestTimeoutSeconds;
-            const outgoingRequestInfo = new OutgoingRequestInfo(outgoingRequestID, clientRemoteInfo, decodedRequestObject.id, expirationTimeSeconds, questionCacheKey);
+            const outgoingRequestInfo = new OutgoingRequestInfo(outgoingRequestID, expirationTimeSeconds, clientRemoteInfo, decodedRequestObject.id, questionCacheKey);
             this.outgoingRequestCache.add(outgoingRequestInfo);
             decodedRequestObject.id = outgoingRequestID;
             if (clientRemoteInfo.isUDP) {
@@ -442,7 +422,7 @@ class DNSProxy {
             if (isPositiveNumber(minTTLSeconds)) {
                 const nowSeconds = getNowSeconds();
                 const expirationTimeSeconds = nowSeconds + minTTLSeconds;
-                const cacheObject = new CacheObject(clientRequestInfo.questionCacheKey, decodedResponseObject, nowSeconds, expirationTimeSeconds);
+                const cacheObject = new CacheObject(clientRequestInfo.questionCacheKey, expirationTimeSeconds, decodedResponseObject, nowSeconds);
                 this.questionToResponseCache.add(cacheObject);
             }
         }

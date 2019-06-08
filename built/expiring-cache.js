@@ -4,14 +4,24 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const tinyqueue_1 = __importDefault(require("tinyqueue"));
+class DefaultExpiringCacheValue {
+    constructor(cacheKey, expirationTimeSeconds) {
+        this.cacheKey = cacheKey;
+        this.expirationTimeSeconds = expirationTimeSeconds;
+    }
+    expired(nowSeconds) {
+        return nowSeconds >= this.expirationTimeSeconds;
+    }
+}
+exports.DefaultExpiringCacheValue = DefaultExpiringCacheValue;
 class ExpiringCache {
     constructor() {
         this.map = new Map();
         this.priorityQueue = new tinyqueue_1.default([], (a, b) => {
-            if (a.getExpirationTimeSeconds() < b.getExpirationTimeSeconds()) {
+            if (a.expirationTimeSeconds < b.expirationTimeSeconds) {
                 return -1;
             }
-            else if (a.getExpirationTimeSeconds() === b.getExpirationTimeSeconds()) {
+            else if (a.expirationTimeSeconds === b.expirationTimeSeconds) {
                 return 0;
             }
             else {
@@ -20,7 +30,7 @@ class ExpiringCache {
         });
     }
     add(value) {
-        this.map.set(value.getCacheKey(), value);
+        this.map.set(value.cacheKey, value);
         this.priorityQueue.push(value);
     }
     get(key) {
@@ -36,10 +46,10 @@ class ExpiringCache {
             const queueObject = this.priorityQueue.peek();
             if (queueObject && queueObject.expired(nowSeconds)) {
                 this.priorityQueue.pop();
-                const mapObject = this.map.get(queueObject.getCacheKey());
+                const mapObject = this.map.get(queueObject.cacheKey);
                 // validate expired cache object has not been re-added to map
                 if (mapObject && mapObject.expired(nowSeconds)) {
-                    this.map.delete(mapObject.getCacheKey());
+                    this.map.delete(mapObject.cacheKey);
                     ++expiredEntries;
                 }
             }

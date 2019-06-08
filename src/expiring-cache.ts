@@ -1,11 +1,27 @@
 import TinyQueue from 'tinyqueue';
 
+export class DefaultExpiringCacheValue<K> implements ExpiringCacheValue<K>{
+
+    constructor(
+        readonly cacheKey: K,
+        readonly expirationTimeSeconds: number) {
+
+    }
+
+    expired(nowSeconds: number): boolean {
+        return nowSeconds >= this.expirationTimeSeconds;
+    }
+
+}
+
 export interface ExpiringCacheValue<K> {
+
     expired(nowSeconds: number): boolean;
 
-    getExpirationTimeSeconds(): number;
+    readonly expirationTimeSeconds: number;
 
-    getCacheKey(): K
+    readonly cacheKey: K
+
 }
 
 export class ExpiringCache<K, V extends ExpiringCacheValue<K>> {
@@ -13,9 +29,9 @@ export class ExpiringCache<K, V extends ExpiringCacheValue<K>> {
     private readonly map = new Map<K, V>();
 
     private readonly priorityQueue = new TinyQueue<V>([], (a: V, b: V) => {
-        if (a.getExpirationTimeSeconds() < b.getExpirationTimeSeconds()) {
+        if (a.expirationTimeSeconds < b.expirationTimeSeconds) {
             return -1;
-        } else if (a.getExpirationTimeSeconds() === b.getExpirationTimeSeconds()) {
+        } else if (a.expirationTimeSeconds === b.expirationTimeSeconds) {
             return 0;
         } else {
             return 1;
@@ -23,7 +39,7 @@ export class ExpiringCache<K, V extends ExpiringCacheValue<K>> {
     });
 
     add(value: V) {
-        this.map.set(value.getCacheKey(), value);
+        this.map.set(value.cacheKey, value);
         this.priorityQueue.push(value);
     }
 
@@ -43,10 +59,10 @@ export class ExpiringCache<K, V extends ExpiringCacheValue<K>> {
             const queueObject = this.priorityQueue.peek();
             if (queueObject && queueObject.expired(nowSeconds)) {
                 this.priorityQueue.pop();
-                const mapObject = this.map.get(queueObject.getCacheKey());
+                const mapObject = this.map.get(queueObject.cacheKey);
                 // validate expired cache object has not been re-added to map
                 if (mapObject && mapObject.expired(nowSeconds)) {
-                    this.map.delete(mapObject.getCacheKey());
+                    this.map.delete(mapObject.cacheKey);
                     ++expiredEntries;
                 }
             } else {
