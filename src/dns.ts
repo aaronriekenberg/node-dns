@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { CacheValue, ExpiringCache } from './expiring-cache';
+import { ExpiringCacheValue, ExpiringCache } from './expiring-cache';
 import * as dnsPacket from 'dns-packet';
 import * as dgram from 'dgram';
 import * as fs from 'fs';
@@ -111,7 +111,7 @@ class ClientRemoteInfo {
     }
 }
 
-class OutgoingRequestInfo implements CacheValue<number> {
+class OutgoingRequestInfo implements ExpiringCacheValue<number> {
 
     constructor(
         readonly outgoingRequestID: number,
@@ -135,7 +135,7 @@ class OutgoingRequestInfo implements CacheValue<number> {
     }
 }
 
-class CacheObject implements CacheValue<String> {
+class CacheObject implements ExpiringCacheValue<String> {
 
     constructor(
         readonly questionCacheKey: string,

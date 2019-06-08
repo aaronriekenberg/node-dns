@@ -1,6 +1,6 @@
 import TinyQueue from 'tinyqueue';
 
-export interface CacheValue<K> {
+export interface ExpiringCacheValue<K> {
     expired(nowSeconds: number): boolean;
 
     getExpirationTimeSeconds(): number;
@@ -8,7 +8,7 @@ export interface CacheValue<K> {
     getCacheKey(): K
 }
 
-export class ExpiringCache<K, V extends CacheValue<K>> {
+export class ExpiringCache<K, V extends ExpiringCacheValue<K>> {
 
     private readonly map = new Map<K, V>();
 
