@@ -7,15 +7,12 @@ var __importStar = (this && this.__importStar) || function (mod) {
     result["default"] = mod;
     return result;
 };
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
+const expiring_cache_1 = require("./expiring-cache");
 const dnsPacket = __importStar(require("dns-packet"));
 const dgram = __importStar(require("dgram"));
 const fs = __importStar(require("fs"));
 const net = __importStar(require("net"));
-const tinyqueue_1 = __importDefault(require("tinyqueue"));
 const process = __importStar(require("process"));
 const winston = __importStar(require("winston"));
 const stringify = JSON.stringify;
@@ -56,58 +53,6 @@ const isNumber = (x) => {
 const isPositiveNumber = (x) => {
     return (isNumber(x) && (x > 0));
 };
-class ExpiringCache {
-    constructor() {
-        this.map = new Map();
-        this.priorityQueue = new tinyqueue_1.default([], (a, b) => {
-            if (a.getExpirationTimeSeconds() < b.getExpirationTimeSeconds()) {
-                return -1;
-            }
-            else if (a.getExpirationTimeSeconds() === b.getExpirationTimeSeconds()) {
-                return 0;
-            }
-            else {
-                return 1;
-            }
-        });
-    }
-    add(value) {
-        this.map.set(value.getCacheKey(), value);
-        this.priorityQueue.push(value);
-    }
-    get(key) {
-        return this.map.get(key);
-    }
-    delete(key) {
-        this.map.delete(key);
-    }
-    periodicCleanUp(nowSeconds) {
-        let expiredEntries = 0;
-        let done = false;
-        while ((this.priorityQueue.length > 0) && (!done)) {
-            const queueObject = this.priorityQueue.peek();
-            if (queueObject && queueObject.expired(nowSeconds)) {
-                this.priorityQueue.pop();
-                const mapObject = this.map.get(queueObject.getCacheKey());
-                // validate expired cache object has not been re-added to map
-                if (mapObject && mapObject.expired(nowSeconds)) {
-                    this.map.delete(mapObject.getCacheKey());
-                    ++expiredEntries;
-                }
-            }
-            else {
-                done = true;
-            }
-        }
-        return expiredEntries;
-    }
-    get mapSize() {
-        return this.map.size;
-    }
-    get queueSize() {
-        return this.priorityQueue.length;
-    }
-}
 class ClientRemoteInfo {
     constructor(udpSocket, udpRemoteInfo, tcpSocket) {
         this.udpSocket = udpSocket;
@@ -313,8 +258,8 @@ class DNSProxy {
         this.configuration = configuration;
         this.metrics = new Metrics();
         this.questionToFixedResponse = new Map();
-        this.outgoingRequestCache = new ExpiringCache();
-        this.questionToResponseCache = new ExpiringCache();
+        this.outgoingRequestCache = new expiring_cache_1.ExpiringCache();
+        this.questionToResponseCache = new expiring_cache_1.ExpiringCache();
         this.tcpServerSocket = net.createServer();
         this.udpRemoteServerConnections = [];
         this.tcpRemoteServerConnections = [];
