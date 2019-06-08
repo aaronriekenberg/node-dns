@@ -71,8 +71,8 @@ class ExpiringCache {
             }
         });
     }
-    add(key, value) {
-        this.map.set(key, value);
+    add(value) {
+        this.map.set(value.getCacheKey(), value);
         this.priorityQueue.push(value);
     }
     get(key) {
@@ -463,7 +463,7 @@ class DNSProxy {
             const outgoingRequestID = this.getRandomDNSID();
             const expirationTimeSeconds = getNowSeconds() + this.configuration.requestTimeoutSeconds;
             const outgoingRequestInfo = new OutgoingRequestInfo(outgoingRequestID, clientRemoteInfo, decodedRequestObject.id, expirationTimeSeconds, questionCacheKey);
-            this.outgoingRequestCache.add(outgoingRequestID, outgoingRequestInfo);
+            this.outgoingRequestCache.add(outgoingRequestInfo);
             decodedRequestObject.id = outgoingRequestID;
             if (clientRemoteInfo.isUDP) {
                 ++this.metrics.remoteUDPRequests;
@@ -498,7 +498,7 @@ class DNSProxy {
                 const nowSeconds = getNowSeconds();
                 const expirationTimeSeconds = nowSeconds + minTTLSeconds;
                 const cacheObject = new CacheObject(clientRequestInfo.questionCacheKey, decodedResponseObject, nowSeconds, expirationTimeSeconds);
-                this.questionToResponseCache.add(clientRequestInfo.questionCacheKey, cacheObject);
+                this.questionToResponseCache.add(cacheObject);
             }
         }
         decodedResponseObject.id = clientRequestInfo.clientRequestID;

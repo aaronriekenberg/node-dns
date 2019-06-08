@@ -76,8 +76,8 @@ class ExpiringCache<K, V extends CacheValue<K>> {
         }
     });
 
-    add(key: K, value: V) {
-        this.map.set(key, value);
+    add(value: V) {
+        this.map.set(value.getCacheKey(), value);
         this.priorityQueue.push(value);
     }
 
@@ -625,7 +625,7 @@ class DNSProxy {
                     expirationTimeSeconds,
                     questionCacheKey);
 
-            this.outgoingRequestCache.add(outgoingRequestID, outgoingRequestInfo);
+            this.outgoingRequestCache.add(outgoingRequestInfo);
 
             decodedRequestObject.id = outgoingRequestID;
 
@@ -678,7 +678,7 @@ class DNSProxy {
                     nowSeconds,
                     expirationTimeSeconds);
 
-                this.questionToResponseCache.add(clientRequestInfo.questionCacheKey, cacheObject);
+                this.questionToResponseCache.add(cacheObject);
             }
         }
 
