@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { SocketBufferSizes, AddressAndPort, Configuration } from './configuration';
 import { DefaultExpiringCacheValue, ExpiringCache } from './expiring-cache';
 import * as dnsPacket from 'dns-packet';
 import * as dgram from 'dgram';
@@ -53,28 +54,6 @@ const isNumber = (x: number | null | undefined): x is number => {
 const isPositiveNumber = (x: number | null | undefined): x is number => {
     return (isNumber(x) && (x > 0));
 };
-
-interface SocketBufferSizes {
-    readonly rcvbuf: number;
-    readonly sndbuf: number;
-}
-
-interface AddressAndPort {
-    readonly address: string,
-    readonly port: number
-}
-
-interface Configuration {
-    readonly udpSocketBufferSizes?: SocketBufferSizes;
-    readonly listenAddressAndPort: AddressAndPort;
-    readonly remoteAddressesAndPorts: AddressAndPort[];
-    readonly minTTLSeconds: number;
-    readonly maxTTLSeconds: number;
-    readonly requestTimeoutSeconds: number;
-    readonly tcpConnectionTimeoutSeconds: number;
-    readonly timerIntervalSeconds: number;
-    readonly fixedResponses?: dnsPacket.DNSPacket[];
-}
 
 class ClientRemoteInfo {
 
