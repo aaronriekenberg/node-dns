@@ -76,7 +76,7 @@ interface Configuration {
     readonly fixedResponses?: dnsPacket.DNSPacket[];
 }
 
-class RemoteInfo {
+class ClientRemoteInfo {
 
     private constructor(
         readonly udpSocket: dgram.Socket | null,
@@ -85,12 +85,12 @@ class RemoteInfo {
 
     }
 
-    static createUDP(udpSocket: dgram.Socket, udpRemoteInfo: dgram.RemoteInfo): RemoteInfo {
-        return new RemoteInfo(udpSocket, udpRemoteInfo, null);
+    static createUDP(udpSocket: dgram.Socket, udpRemoteInfo: dgram.RemoteInfo): ClientRemoteInfo {
+        return new ClientRemoteInfo(udpSocket, udpRemoteInfo, null);
     }
 
-    static createTCP(tcpSocket: net.Socket): RemoteInfo {
-        return new RemoteInfo(null, null, tcpSocket);
+    static createTCP(tcpSocket: net.Socket): ClientRemoteInfo {
+        return new ClientRemoteInfo(null, null, tcpSocket);
     }
 
     writeResponse(dnsResponse: dnsPacket.DNSPacket) {
@@ -115,7 +115,7 @@ class OutgoingRequestInfo {
 
     constructor(
         readonly outgoingRequestID: number,
-        readonly clientRemoteInfo: RemoteInfo,
+        readonly clientRemoteInfo: ClientRemoteInfo,
         readonly clientRequestID: number,
         readonly expirationTimeSeconds: number,
         readonly questionCacheKey: string) {
@@ -541,7 +541,7 @@ class DNSProxy {
         logger.info(`end timer pop ${stringify(logData)}`);
     }
 
-    private handleServerSocketMessage(decodedRequestObject: dnsPacket.DNSPacket, clientRemoteInfo: RemoteInfo) {
+    private handleServerSocketMessage(decodedRequestObject: dnsPacket.DNSPacket, clientRemoteInfo: ClientRemoteInfo) {
         // logger.info(`serverSocket message remoteInfo = ${stringifyPretty(clientRemoteInfo)}\ndecodedRequestObject = ${stringifyPretty(decodedRequestObject)}`);
 
         if ((!isNumber(decodedRequestObject.id)) || (!decodedRequestObject.questions)) {
@@ -678,7 +678,7 @@ class DNSProxy {
 
         this.udpServerSocket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
             const decodedMessage = dnsPacket.decode(message);
-            this.handleServerSocketMessage(decodedMessage, RemoteInfo.createUDP(this.udpServerSocket, remoteInfo));
+            this.handleServerSocketMessage(decodedMessage, ClientRemoteInfo.createUDP(this.udpServerSocket, remoteInfo));
         });
 
         this.udpServerSocket.bind(
@@ -710,7 +710,7 @@ class DNSProxy {
             });
 
             connection.on('data', createTCPReadHandler((decodedMessage) => {
-                this.handleServerSocketMessage(decodedMessage, RemoteInfo.createTCP(connection))
+                this.handleServerSocketMessage(decodedMessage, ClientRemoteInfo.createTCP(connection))
             }));
 
             connection.on('timeout', () => {

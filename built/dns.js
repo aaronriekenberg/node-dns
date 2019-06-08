@@ -56,17 +56,17 @@ const isNumber = (x) => {
 const isPositiveNumber = (x) => {
     return (isNumber(x) && (x > 0));
 };
-class RemoteInfo {
+class ClientRemoteInfo {
     constructor(udpSocket, udpRemoteInfo, tcpSocket) {
         this.udpSocket = udpSocket;
         this.udpRemoteInfo = udpRemoteInfo;
         this.tcpSocket = tcpSocket;
     }
     static createUDP(udpSocket, udpRemoteInfo) {
-        return new RemoteInfo(udpSocket, udpRemoteInfo, null);
+        return new ClientRemoteInfo(udpSocket, udpRemoteInfo, null);
     }
     static createTCP(tcpSocket) {
-        return new RemoteInfo(null, null, tcpSocket);
+        return new ClientRemoteInfo(null, null, tcpSocket);
     }
     writeResponse(dnsResponse) {
         if (this.udpSocket && this.udpRemoteInfo) {
@@ -514,7 +514,7 @@ class DNSProxy {
         });
         this.udpServerSocket.on('message', (message, remoteInfo) => {
             const decodedMessage = dnsPacket.decode(message);
-            this.handleServerSocketMessage(decodedMessage, RemoteInfo.createUDP(this.udpServerSocket, remoteInfo));
+            this.handleServerSocketMessage(decodedMessage, ClientRemoteInfo.createUDP(this.udpServerSocket, remoteInfo));
         });
         this.udpServerSocket.bind(this.configuration.listenAddressAndPort.port, this.configuration.listenAddressAndPort.address);
         let tcpServerSocketListening = false;
@@ -536,7 +536,7 @@ class DNSProxy {
             connection.on('close', () => {
             });
             connection.on('data', createTCPReadHandler((decodedMessage) => {
-                this.handleServerSocketMessage(decodedMessage, RemoteInfo.createTCP(connection));
+                this.handleServerSocketMessage(decodedMessage, ClientRemoteInfo.createTCP(connection));
             }));
             connection.on('timeout', () => {
                 connection.destroy();
