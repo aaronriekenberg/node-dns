@@ -8,7 +8,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-const expiring_cache_1 = require("./expiring-cache");
+const expiringCache = __importStar(require("./expiring-cache"));
 const dnsPacket = __importStar(require("dns-packet"));
 const dgram = __importStar(require("dgram"));
 const fs = __importStar(require("fs"));
@@ -80,7 +80,7 @@ class ClientRemoteInfo {
         return ((this.udpSocket !== null) && (this.udpRemoteInfo !== null));
     }
 }
-class OutgoingRequestInfo extends expiring_cache_1.DefaultExpiringCacheValue {
+class OutgoingRequestInfo extends expiringCache.DefaultExpiringCacheValue {
     constructor(outgoingRequestID, expirationTimeSeconds, clientRemoteInfo, clientRequestID, questionCacheKey) {
         super(outgoingRequestID, expirationTimeSeconds);
         this.clientRemoteInfo = clientRemoteInfo;
@@ -88,7 +88,7 @@ class OutgoingRequestInfo extends expiring_cache_1.DefaultExpiringCacheValue {
         this.questionCacheKey = questionCacheKey;
     }
 }
-class CacheObject extends expiring_cache_1.DefaultExpiringCacheValue {
+class CacheObject extends expiringCache.DefaultExpiringCacheValue {
     constructor(questionCacheKey, expirationTimeSeconds, decodedResponse, cacheTimeSeconds) {
         super(questionCacheKey, expirationTimeSeconds);
         this.decodedResponse = decodedResponse;
@@ -238,8 +238,8 @@ class DNSProxy {
         this.configuration = configuration;
         this.metrics = new Metrics();
         this.questionToFixedResponse = new Map();
-        this.outgoingRequestCache = new expiring_cache_1.ExpiringCache();
-        this.questionToResponseCache = new expiring_cache_1.ExpiringCache();
+        this.outgoingRequestCache = new expiringCache.ExpiringCache();
+        this.questionToResponseCache = new expiringCache.ExpiringCache();
         this.tcpServerSocket = net.createServer();
         this.udpRemoteServerConnections = [];
         this.tcpRemoteServerConnections = [];

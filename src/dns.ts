@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { SocketBufferSizes, AddressAndPort, Configuration } from './configuration';
-import { DefaultExpiringCacheValue, ExpiringCache } from './expiring-cache';
+import * as configuration from './configuration';
+import * as expiringCache from './expiring-cache';
 import * as dnsPacket from 'dns-packet';
 import * as dgram from 'dgram';
 import * as fs from 'fs';
@@ -90,7 +90,7 @@ class ClientRemoteInfo {
     }
 }
 
-class OutgoingRequestInfo extends DefaultExpiringCacheValue<number> {
+class OutgoingRequestInfo extends expiringCache.DefaultExpiringCacheValue<number> {
 
     constructor(
         outgoingRequestID: number,
@@ -103,7 +103,7 @@ class OutgoingRequestInfo extends DefaultExpiringCacheValue<number> {
 
 }
 
-class CacheObject extends DefaultExpiringCacheValue<string> {
+class CacheObject extends expiringCache.DefaultExpiringCacheValue<string> {
 
     constructor(
         questionCacheKey: string,
@@ -147,7 +147,7 @@ const createTCPReadHandler = (messageCallback: (decodedMessage: dnsPacket.DNSPac
     };
 };
 
-const createUDPSocket = (socketBufferSizes?: SocketBufferSizes): dgram.Socket => {
+const createUDPSocket = (socketBufferSizes?: configuration.SocketBufferSizes): dgram.Socket => {
     let recvBufferSize: number | undefined;
     let sendBufferSize: number | undefined;
 
@@ -174,9 +174,9 @@ class UDPRemoteServerConnection implements RemoteServerConnection {
     private socketListening = false;
 
     constructor(
-        private readonly remoteAddressAndPort: AddressAndPort,
+        private readonly remoteAddressAndPort: configuration.AddressAndPort,
         private readonly messageCallback: (decodedMessage: dnsPacket.DNSPacket) => void,
-        socketBufferSizes?: SocketBufferSizes) {
+        socketBufferSizes?: configuration.SocketBufferSizes) {
 
         this.socket = createUDPSocket(socketBufferSizes);
 
@@ -223,7 +223,7 @@ class TCPRemoteServerConnection implements RemoteServerConnection {
 
     constructor(
         private readonly socketTimeoutMilliseconds: number,
-        private readonly remoteAddressAndPort: AddressAndPort,
+        private readonly remoteAddressAndPort: configuration.AddressAndPort,
         private readonly messageCallback: (decodedMessage: dnsPacket.DNSPacket) => void) {
 
     }
@@ -300,9 +300,9 @@ class DNSProxy {
 
     private readonly questionToFixedResponse = new Map<string, dnsPacket.DNSPacket>();
 
-    private readonly outgoingRequestCache = new ExpiringCache<number, OutgoingRequestInfo>();
+    private readonly outgoingRequestCache = new expiringCache.ExpiringCache<number, OutgoingRequestInfo>();
 
-    private readonly questionToResponseCache = new ExpiringCache<string, CacheObject>();
+    private readonly questionToResponseCache = new expiringCache.ExpiringCache<string, CacheObject>();
 
     private readonly udpServerSocket: dgram.Socket;
 
@@ -312,7 +312,7 @@ class DNSProxy {
 
     private readonly tcpRemoteServerConnections: TCPRemoteServerConnection[] = [];
 
-    constructor(private readonly configuration: Configuration) {
+    constructor(private readonly configuration: configuration.Configuration) {
         this.udpServerSocket = createUDPSocket(configuration.udpSocketBufferSizes);
 
         configuration.remoteAddressesAndPorts.forEach((remoteAddressAndPort) => {
@@ -660,7 +660,7 @@ const readConfiguration = async (configFilePath: string) => {
 
     const fileContent = await asyncReadFile(configFilePath, UTF8);
 
-    const configuration = JSON.parse(fileContent.toString()) as Configuration;
+    const configuration = JSON.parse(fileContent.toString()) as configuration.Configuration;
 
     logger.info(`configuration = ${stringifyPretty(configuration)}`);
 
