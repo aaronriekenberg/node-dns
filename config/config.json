@@ -40,6 +40,28 @@
             ],
             "authorities": [],
             "additionals": []
+        },
+        {
+            "type": "response",
+            "flags": 384,
+            "questions": [
+                {
+                    "name": "1.1.168.192.in-addr.arpa",
+                    "type": "PTR",
+                    "class": "IN"
+                }
+            ],
+            "answers": [
+                {
+                    "name": "1.1.168.192.in-addr.arpa",
+                    "type": "PTR",
+                    "ttl": 10,
+                    "class": "IN",
+                    "data": "apu2.domain"
+                }
+            ],
+            "authorities": [],
+            "additionals": []
         }
     ]
 }
