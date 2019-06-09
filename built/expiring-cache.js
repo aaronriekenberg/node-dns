@@ -14,7 +14,7 @@ class ExpiringCacheEntry {
         return nowSeconds >= this.expirationTimeSeconds;
     }
 }
-function expiringCacheEntryComparator() {
+const expiringCacheEntryComparator = () => {
     return (a, b) => {
         if (a.expirationTimeSeconds < b.expirationTimeSeconds) {
             return -1;
@@ -26,7 +26,7 @@ function expiringCacheEntryComparator() {
             return 1;
         }
     };
-}
+};
 class ExpiringCache {
     constructor() {
         this.map = new Map();

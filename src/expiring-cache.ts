@@ -15,7 +15,7 @@ class ExpiringCacheEntry<K, V> {
 
 }
 
-function expiringCacheEntryComparator<K, V>(): tinyqueue.Comparator<ExpiringCacheEntry<K, V>> {
+const expiringCacheEntryComparator = <K, V>(): tinyqueue.Comparator<ExpiringCacheEntry<K, V>> => {
     return (a: ExpiringCacheEntry<K, V>, b: ExpiringCacheEntry<K, V>) => {
         if (a.expirationTimeSeconds < b.expirationTimeSeconds) {
             return -1;
@@ -25,7 +25,7 @@ function expiringCacheEntryComparator<K, V>(): tinyqueue.Comparator<ExpiringCach
             return 1;
         }
     };
-}
+};
 
 export default class ExpiringCache<K, V> {
 
