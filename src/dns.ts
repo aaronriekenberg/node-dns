@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import * as configuration from './configuration';
-import * as expiringCache from './expiring-cache';
+import ExpiringCache from './expiring-cache';
 import * as dnsPacket from 'dns-packet';
 import * as dgram from 'dgram';
 import * as fs from 'fs';
@@ -90,27 +90,24 @@ class ClientRemoteInfo {
     }
 }
 
-class OutgoingRequestInfo extends expiringCache.DefaultExpiringCacheValue<number> {
+class OutgoingRequestInfo {
 
     constructor(
-        outgoingRequestID: number,
-        expirationTimeSeconds: number,
         readonly clientRemoteInfo: ClientRemoteInfo,
         readonly clientRequestID: number,
         readonly questionCacheKey: string) {
-        super(outgoingRequestID, expirationTimeSeconds);
+
     }
 
 }
 
-class CacheObject extends expiringCache.DefaultExpiringCacheValue<string> {
+class CacheObject {
 
     constructor(
-        questionCacheKey: string,
-        expirationTimeSeconds: number,
+        readonly expirationTimeSeconds: number,
         readonly decodedResponse: dnsPacket.DNSPacket,
         readonly cacheTimeSeconds: number) {
-        super(questionCacheKey, expirationTimeSeconds);
+
     }
 
 }
@@ -300,9 +297,9 @@ class DNSProxy {
 
     private readonly questionToFixedResponse = new Map<string, dnsPacket.DNSPacket>();
 
-    private readonly outgoingRequestCache = new expiringCache.ExpiringCache<number, OutgoingRequestInfo>();
+    private readonly outgoingRequestCache = new ExpiringCache<number, OutgoingRequestInfo>();
 
-    private readonly questionToResponseCache = new expiringCache.ExpiringCache<string, CacheObject>();
+    private readonly questionToResponseCache = new ExpiringCache<string, CacheObject>();
 
     private readonly udpServerSocket: dgram.Socket;
 
@@ -509,13 +506,11 @@ class DNSProxy {
 
             const outgoingRequestInfo =
                 new OutgoingRequestInfo(
-                    outgoingRequestID,
-                    expirationTimeSeconds,
                     clientRemoteInfo,
                     decodedRequestObject.id,
                     questionCacheKey);
 
-            this.outgoingRequestCache.add(outgoingRequestInfo);
+            this.outgoingRequestCache.add(outgoingRequestID, outgoingRequestInfo, expirationTimeSeconds);
 
             decodedRequestObject.id = outgoingRequestID;
 
@@ -563,12 +558,11 @@ class DNSProxy {
                 const expirationTimeSeconds = nowSeconds + minTTLSeconds;
 
                 const cacheObject = new CacheObject(
-                    clientRequestInfo.questionCacheKey,
                     expirationTimeSeconds,
                     decodedResponseObject,
                     nowSeconds);
 
-                this.questionToResponseCache.add(cacheObject);
+                this.questionToResponseCache.add(clientRequestInfo.questionCacheKey, cacheObject, expirationTimeSeconds);
             }
         }
 

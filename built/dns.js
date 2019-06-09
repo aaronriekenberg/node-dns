@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 var __importStar = (this && this.__importStar) || function (mod) {
     if (mod && mod.__esModule) return mod;
     var result = {};
@@ -8,7 +11,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-const expiringCache = __importStar(require("./expiring-cache"));
+const expiring_cache_1 = __importDefault(require("./expiring-cache"));
 const dnsPacket = __importStar(require("dns-packet"));
 const dgram = __importStar(require("dgram"));
 const fs = __importStar(require("fs"));
@@ -80,17 +83,16 @@ class ClientRemoteInfo {
         return ((this.udpSocket !== null) && (this.udpRemoteInfo !== null));
     }
 }
-class OutgoingRequestInfo extends expiringCache.DefaultExpiringCacheValue {
-    constructor(outgoingRequestID, expirationTimeSeconds, clientRemoteInfo, clientRequestID, questionCacheKey) {
-        super(outgoingRequestID, expirationTimeSeconds);
+class OutgoingRequestInfo {
+    constructor(clientRemoteInfo, clientRequestID, questionCacheKey) {
         this.clientRemoteInfo = clientRemoteInfo;
         this.clientRequestID = clientRequestID;
         this.questionCacheKey = questionCacheKey;
     }
 }
-class CacheObject extends expiringCache.DefaultExpiringCacheValue {
-    constructor(questionCacheKey, expirationTimeSeconds, decodedResponse, cacheTimeSeconds) {
-        super(questionCacheKey, expirationTimeSeconds);
+class CacheObject {
+    constructor(expirationTimeSeconds, decodedResponse, cacheTimeSeconds) {
+        this.expirationTimeSeconds = expirationTimeSeconds;
         this.decodedResponse = decodedResponse;
         this.cacheTimeSeconds = cacheTimeSeconds;
     }
@@ -238,8 +240,8 @@ class DNSProxy {
         this.configuration = configuration;
         this.metrics = new Metrics();
         this.questionToFixedResponse = new Map();
-        this.outgoingRequestCache = new expiringCache.ExpiringCache();
-        this.questionToResponseCache = new expiringCache.ExpiringCache();
+        this.outgoingRequestCache = new expiring_cache_1.default();
+        this.questionToResponseCache = new expiring_cache_1.default();
         this.tcpServerSocket = net.createServer();
         this.udpRemoteServerConnections = [];
         this.tcpRemoteServerConnections = [];
@@ -387,8 +389,8 @@ class DNSProxy {
             ++this.metrics.cacheMisses;
             const outgoingRequestID = this.getRandomDNSID();
             const expirationTimeSeconds = getNowSeconds() + this.configuration.requestTimeoutSeconds;
-            const outgoingRequestInfo = new OutgoingRequestInfo(outgoingRequestID, expirationTimeSeconds, clientRemoteInfo, decodedRequestObject.id, questionCacheKey);
-            this.outgoingRequestCache.add(outgoingRequestInfo);
+            const outgoingRequestInfo = new OutgoingRequestInfo(clientRemoteInfo, decodedRequestObject.id, questionCacheKey);
+            this.outgoingRequestCache.add(outgoingRequestID, outgoingRequestInfo, expirationTimeSeconds);
             decodedRequestObject.id = outgoingRequestID;
             if (clientRemoteInfo.isUDP) {
                 ++this.metrics.remoteUDPRequests;
@@ -422,8 +424,8 @@ class DNSProxy {
             if (isPositiveNumber(minTTLSeconds)) {
                 const nowSeconds = getNowSeconds();
                 const expirationTimeSeconds = nowSeconds + minTTLSeconds;
-                const cacheObject = new CacheObject(clientRequestInfo.questionCacheKey, expirationTimeSeconds, decodedResponseObject, nowSeconds);
-                this.questionToResponseCache.add(cacheObject);
+                const cacheObject = new CacheObject(expirationTimeSeconds, decodedResponseObject, nowSeconds);
+                this.questionToResponseCache.add(clientRequestInfo.questionCacheKey, cacheObject, expirationTimeSeconds);
             }
         }
         decodedResponseObject.id = clientRequestInfo.clientRequestID;
