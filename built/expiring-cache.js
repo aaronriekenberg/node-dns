@@ -4,6 +4,17 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const tinyqueue_1 = __importDefault(require("tinyqueue"));
+const expirableComparator = (a, b) => {
+    if (a.expirationTimeSeconds < b.expirationTimeSeconds) {
+        return -1;
+    }
+    else if (a.expirationTimeSeconds === b.expirationTimeSeconds) {
+        return 0;
+    }
+    else {
+        return 1;
+    }
+};
 class ExpiringCacheEntry {
     constructor(key, value, expirationTimeSeconds) {
         this.key = key;
@@ -14,23 +25,10 @@ class ExpiringCacheEntry {
         return nowSeconds >= this.expirationTimeSeconds;
     }
 }
-const expiringCacheEntryComparator = () => {
-    return (a, b) => {
-        if (a.expirationTimeSeconds < b.expirationTimeSeconds) {
-            return -1;
-        }
-        else if (a.expirationTimeSeconds === b.expirationTimeSeconds) {
-            return 0;
-        }
-        else {
-            return 1;
-        }
-    };
-};
 class ExpiringCache {
     constructor() {
         this.map = new Map();
-        this.priorityQueue = new tinyqueue_1.default([], expiringCacheEntryComparator());
+        this.priorityQueue = new tinyqueue_1.default([], expirableComparator);
     }
     add(key, value, expirationTimeSeconds) {
         const cacheEntry = new ExpiringCacheEntry(key, value, expirationTimeSeconds);

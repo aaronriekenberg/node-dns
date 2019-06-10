@@ -1,6 +1,21 @@
 import TinyQueue, * as tinyqueue from 'tinyqueue';
 
-class ExpiringCacheEntry<K, V> {
+interface Expirable {
+    readonly expirationTimeSeconds: number;
+}
+
+const expirableComparator: tinyqueue.Comparator<Expirable> =
+    (a: Expirable, b: Expirable) => {
+        if (a.expirationTimeSeconds < b.expirationTimeSeconds) {
+            return -1;
+        } else if (a.expirationTimeSeconds === b.expirationTimeSeconds) {
+            return 0;
+        } else {
+            return 1;
+        }
+    };
+
+class ExpiringCacheEntry<K, V> implements Expirable {
 
     constructor(
         readonly key: K,
@@ -15,23 +30,11 @@ class ExpiringCacheEntry<K, V> {
 
 }
 
-const expiringCacheEntryComparator = <K, V>(): tinyqueue.Comparator<ExpiringCacheEntry<K, V>> => {
-    return (a: ExpiringCacheEntry<K, V>, b: ExpiringCacheEntry<K, V>) => {
-        if (a.expirationTimeSeconds < b.expirationTimeSeconds) {
-            return -1;
-        } else if (a.expirationTimeSeconds === b.expirationTimeSeconds) {
-            return 0;
-        } else {
-            return 1;
-        }
-    };
-};
-
 export default class ExpiringCache<K, V> {
 
     private readonly map = new Map<K, ExpiringCacheEntry<K, V>>();
 
-    private readonly priorityQueue = new TinyQueue<ExpiringCacheEntry<K, V>>([], expiringCacheEntryComparator());
+    private readonly priorityQueue = new TinyQueue<ExpiringCacheEntry<K, V>>([], expirableComparator);
 
     add(key: K, value: V, expirationTimeSeconds: number) {
         const cacheEntry = new ExpiringCacheEntry(key, value, expirationTimeSeconds);
