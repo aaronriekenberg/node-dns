@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as net from 'net';
 import * as process from 'process';
 import * as winston from 'winston';
+import { decode } from 'punycode';
 
 const stringify = JSON.stringify;
 const stringifyPretty = (object: any) => stringify(object, null, 2);
@@ -55,6 +56,45 @@ const isPositiveNumber = (x: number | null | undefined): x is number => {
     return (isNumber(x) && (x > 0));
 };
 
+const writeDNSPacketToTCPSocket = (tcpSocket: net.Socket, packet: dnsPacket.DNSPacket) => {
+    try {
+        if (!tcpSocket.destroyed) {
+            tcpSocket.write(dnsPacket.streamEncode(packet));
+        }
+    } catch (err) {
+        logger.error(`writeDNSPacketToTCPSocket error err = ${formatError(err)}`);
+    }
+};
+
+const writeDNSPacketToUDPSocket = (udpSocket: dgram.Socket, port: number, address: string, packet: dnsPacket.DNSPacket) => {
+    try {
+        const outgoingMessage = dnsPacket.encode(packet);
+        udpSocket.send(outgoingMessage, 0, outgoingMessage.length, port, address);
+    } catch (err) {
+        logger.error(`writeDNSPacketToUDPSocket error err = ${formatError(err)}`);
+    }
+};
+
+const streamDecodeDNSPacket = (buffer: Buffer): dnsPacket.DNSPacket | undefined => {
+    let packet: dnsPacket.DNSPacket | undefined;
+    try {
+        packet = dnsPacket.streamDecode(buffer);
+    } catch (err) {
+        logger.error(`streamDecodeDNSPacket error err = ${formatError(err)}`);
+    }
+    return packet;
+};
+
+const decodeDNSPacket = (buffer: Buffer): dnsPacket.DNSPacket | undefined => {
+    let packet: dnsPacket.DNSPacket | undefined;
+    try {
+        packet = dnsPacket.decode(buffer);
+    } catch (err) {
+        logger.error(`decodeDNSPacket error err = ${formatError(err)}`);
+    }
+    return packet;
+};
+
 class ClientRemoteInfo {
 
     private constructor(
@@ -74,14 +114,11 @@ class ClientRemoteInfo {
 
     writeResponse(dnsResponse: dnsPacket.DNSPacket) {
         if (this.udpSocket && this.udpRemoteInfo) {
-            const outgoingMessage = dnsPacket.encode(dnsResponse);
-            this.udpSocket.send(outgoingMessage, 0, outgoingMessage.length, this.udpRemoteInfo.port, this.udpRemoteInfo.address);
+            writeDNSPacketToUDPSocket(this.udpSocket, this.udpRemoteInfo.port, this.udpRemoteInfo.address, dnsResponse);
         }
 
         else if (this.tcpSocket) {
-            if (!this.tcpSocket.destroyed) {
-                this.tcpSocket.write(dnsPacket.streamEncode(dnsResponse));
-            }
+            writeDNSPacketToTCPSocket(this.tcpSocket, dnsResponse);
         }
     }
 
@@ -131,8 +168,10 @@ const createTCPReadHandler = (messageCallback: (decodedMessage: dnsPacket.DNSPac
                 }
             } else {
                 if (buffer.byteLength >= (2 + bodyLength)) {
-                    const decodedMessage = dnsPacket.streamDecode(buffer.slice(0, 2 + bodyLength));
-                    messageCallback(decodedMessage);
+                    const decodedMessage = streamDecodeDNSPacket(buffer.slice(0, 2 + bodyLength));
+                    if (decodedMessage) {
+                        messageCallback(decodedMessage);
+                    }
                     buffer = buffer.slice(2 + bodyLength);
                     readingHeader = true;
                     bodyLength = 0;
@@ -195,7 +234,10 @@ class UDPRemoteServerConnection implements RemoteServerConnection {
         });
 
         this.socket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
-            this.messageCallback(dnsPacket.decode(message));
+            const decodedMessage = decodeDNSPacket(message);
+            if (decodedMessage) {
+                this.messageCallback(decodedMessage);
+            }
         });
 
         this.socket.bind();
@@ -203,8 +245,7 @@ class UDPRemoteServerConnection implements RemoteServerConnection {
 
     writeRequest(dnsRequest: dnsPacket.DNSPacket): void {
         if (this.socketListening) {
-            const outgoingMessage = dnsPacket.encode(dnsRequest);
-            this.socket.send(outgoingMessage, 0, outgoingMessage.length, this.remoteAddressAndPort.port, this.remoteAddressAndPort.address);
+            writeDNSPacketToUDPSocket(this.socket, this.remoteAddressAndPort.port, this.remoteAddressAndPort.address, dnsRequest);
         }
     }
 
@@ -233,9 +274,7 @@ class TCPRemoteServerConnection implements RemoteServerConnection {
         }
 
         else if (this.socket) {
-            if (!this.socket.destroyed) {
-                this.socket.write(dnsPacket.streamEncode(dnsRequest));
-            }
+            writeDNSPacketToTCPSocket(this.socket, dnsRequest);
         }
     }
 
@@ -266,9 +305,7 @@ class TCPRemoteServerConnection implements RemoteServerConnection {
             socket.on('connect', () => {
                 this.connecting = false;
                 this.requestBuffer.forEach((bufferedRequest) => {
-                    if (!socket.destroyed) {
-                        socket.write(dnsPacket.streamEncode(bufferedRequest));
-                    }
+                    writeDNSPacketToTCPSocket(socket, bufferedRequest);
                 });
                 this.requestBuffer = [];
             });
@@ -589,8 +626,10 @@ class DNSProxy {
         });
 
         this.udpServerSocket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
-            const decodedMessage = dnsPacket.decode(message);
-            this.handleServerSocketMessage(decodedMessage, ClientRemoteInfo.createUDP(this.udpServerSocket, remoteInfo));
+            const decodedMessage = decodeDNSPacket(message);
+            if (decodedMessage) {
+                this.handleServerSocketMessage(decodedMessage, ClientRemoteInfo.createUDP(this.udpServerSocket, remoteInfo));
+            }
         });
 
         this.udpServerSocket.bind(
