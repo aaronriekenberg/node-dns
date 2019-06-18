@@ -8,7 +8,6 @@ import * as fs from 'fs';
 import * as net from 'net';
 import * as process from 'process';
 import * as winston from 'winston';
-import { decode } from 'punycode';
 
 const stringify = JSON.stringify;
 const stringifyPretty = (object: any) => stringify(object, null, 2);
