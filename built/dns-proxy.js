@@ -261,13 +261,19 @@ class TCPRemoteServerConnection {
         }
     }
 }
+class RequestProtocolMetrics {
+    constructor() {
+        this.udpRequests = 0;
+        this.tcpRequests = 0;
+    }
+}
 class Metrics {
     constructor() {
         this.cacheHits = 0;
         this.cacheMisses = 0;
         this.fixedResponses = 0;
-        this.remoteUDPRequests = 0;
-        this.remoteTCPRequests = 0;
+        this.localRequests = new RequestProtocolMetrics();
+        this.remoteRequests = new RequestProtocolMetrics();
         this.responseQuestionCacheKeyMismatch = 0;
     }
 }
@@ -400,6 +406,12 @@ class DNSProxy {
             logger.warn(`handleServerSocketMessage invalid decodedRequestObject ${decodedRequestObject}`);
             return;
         }
+        if (clientRemoteInfo.isUDP) {
+            ++this.metrics.localRequests.udpRequests;
+        }
+        else {
+            ++this.metrics.localRequests.tcpRequests;
+        }
         let responded = false;
         const questionCacheKey = this.getQuestionCacheKey(decodedRequestObject.questions);
         if (!responded) {
@@ -429,11 +441,11 @@ class DNSProxy {
             this.outgoingRequestCache.add(outgoingRequestID, outgoingRequestInfo, expirationTimeSeconds);
             decodedRequestObject.id = outgoingRequestID;
             if (clientRemoteInfo.isUDP) {
-                ++this.metrics.remoteUDPRequests;
+                ++this.metrics.remoteRequests.udpRequests;
                 this.getNextUDPRemoteServerConnection().writeRequest(decodedRequestObject);
             }
             else {
-                ++this.metrics.remoteTCPRequests;
+                ++this.metrics.remoteRequests.tcpRequests;
                 this.getNextTCPRemoteServerConnection().writeRequest(decodedRequestObject);
             }
         }

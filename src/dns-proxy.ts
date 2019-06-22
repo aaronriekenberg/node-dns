@@ -316,12 +316,17 @@ class TCPRemoteServerConnection implements RemoteServerConnection {
 
 }
 
+class RequestProtocolMetrics {
+    udpRequests: number = 0;
+    tcpRequests: number = 0;
+}
+
 class Metrics {
     cacheHits: number = 0;
     cacheMisses: number = 0;
     fixedResponses: number = 0;
-    remoteUDPRequests: number = 0;
-    remoteTCPRequests: number = 0;
+    readonly localRequests = new RequestProtocolMetrics();
+    readonly remoteRequests = new RequestProtocolMetrics();
     responseQuestionCacheKeyMismatch: number = 0;
 }
 
@@ -502,6 +507,12 @@ class DNSProxy {
             return;
         }
 
+        if (clientRemoteInfo.isUDP) {
+            ++this.metrics.localRequests.udpRequests;
+        } else {
+            ++this.metrics.localRequests.tcpRequests;
+        }
+
         let responded = false;
 
         const questionCacheKey = this.getQuestionCacheKey(decodedRequestObject.questions);
@@ -551,10 +562,10 @@ class DNSProxy {
             decodedRequestObject.id = outgoingRequestID;
 
             if (clientRemoteInfo.isUDP) {
-                ++this.metrics.remoteUDPRequests;
+                ++this.metrics.remoteRequests.udpRequests;
                 this.getNextUDPRemoteServerConnection().writeRequest(decodedRequestObject);
             } else {
-                ++this.metrics.remoteTCPRequests;
+                ++this.metrics.remoteRequests.tcpRequests;
                 this.getNextTCPRemoteServerConnection().writeRequest(decodedRequestObject);
             }
         }
