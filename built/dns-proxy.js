@@ -263,8 +263,8 @@ class TCPRemoteServerConnection {
 }
 class RequestProtocolMetrics {
     constructor() {
-        this.udpRequests = 0;
-        this.tcpRequests = 0;
+        this.udp = 0;
+        this.tcp = 0;
     }
 }
 class Metrics {
@@ -407,10 +407,10 @@ class DNSProxy {
             return;
         }
         if (clientRemoteInfo.isUDP) {
-            ++this.metrics.localRequests.udpRequests;
+            ++this.metrics.localRequests.udp;
         }
         else {
-            ++this.metrics.localRequests.tcpRequests;
+            ++this.metrics.localRequests.tcp;
         }
         let responded = false;
         const questionCacheKey = this.getQuestionCacheKey(decodedRequestObject.questions);
@@ -441,11 +441,11 @@ class DNSProxy {
             this.outgoingRequestCache.add(outgoingRequestID, outgoingRequestInfo, expirationTimeSeconds);
             decodedRequestObject.id = outgoingRequestID;
             if (clientRemoteInfo.isUDP) {
-                ++this.metrics.remoteRequests.udpRequests;
+                ++this.metrics.remoteRequests.udp;
                 this.getNextUDPRemoteServerConnection().writeRequest(decodedRequestObject);
             }
             else {
-                ++this.metrics.remoteRequests.tcpRequests;
+                ++this.metrics.remoteRequests.tcp;
                 this.getNextTCPRemoteServerConnection().writeRequest(decodedRequestObject);
             }
         }

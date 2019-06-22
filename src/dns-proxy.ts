@@ -317,8 +317,8 @@ class TCPRemoteServerConnection implements RemoteServerConnection {
 }
 
 class RequestProtocolMetrics {
-    udpRequests: number = 0;
-    tcpRequests: number = 0;
+    udp: number = 0;
+    tcp: number = 0;
 }
 
 class Metrics {
@@ -508,9 +508,9 @@ class DNSProxy {
         }
 
         if (clientRemoteInfo.isUDP) {
-            ++this.metrics.localRequests.udpRequests;
+            ++this.metrics.localRequests.udp;
         } else {
-            ++this.metrics.localRequests.tcpRequests;
+            ++this.metrics.localRequests.tcp;
         }
 
         let responded = false;
@@ -562,10 +562,10 @@ class DNSProxy {
             decodedRequestObject.id = outgoingRequestID;
 
             if (clientRemoteInfo.isUDP) {
-                ++this.metrics.remoteRequests.udpRequests;
+                ++this.metrics.remoteRequests.udp;
                 this.getNextUDPRemoteServerConnection().writeRequest(decodedRequestObject);
             } else {
-                ++this.metrics.remoteRequests.tcpRequests;
+                ++this.metrics.remoteRequests.tcp;
                 this.getNextTCPRemoteServerConnection().writeRequest(decodedRequestObject);
             }
         }
