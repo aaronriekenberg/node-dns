@@ -68,7 +68,7 @@ const writeDNSPacketToTCPSocket = (tcpSocket: net.Socket, packet: dnsPacket.DNSP
 const writeDNSPacketToUDPSocket = (udpSocket: dgram.Socket, port: number, address: string, packet: dnsPacket.DNSPacket) => {
     try {
         const outgoingMessage = dnsPacket.encode(packet);
-        udpSocket.send(outgoingMessage, 0, outgoingMessage.length, port, address);
+        udpSocket.send(outgoingMessage, port, address);
     } catch (err) {
         logger.error(`writeDNSPacketToUDPSocket error err = ${formatError(err)}`);
     }
