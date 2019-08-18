@@ -148,7 +148,7 @@ class CacheObject {
 
 }
 
-const createTCPReadHandler = (messageCallback: (decodedMessage: dnsPacket.DNSPacket) => void): ((data: Buffer) => void) => {
+const createTCPDataHandler = (messageCallback: (decodedMessage: dnsPacket.DNSPacket) => void): ((data: Buffer) => void) => {
     let readingHeader = true;
     let buffer = Buffer.of();
     let bodyLength = 0;
@@ -293,7 +293,7 @@ class TCPRemoteServerConnection implements RemoteServerConnection {
                 this.requestBuffer = [];
             });
 
-            socket.on('data', createTCPReadHandler((decodedMessage) => this.messageCallback(decodedMessage)));
+            socket.on('data', createTCPDataHandler((decodedMessage) => this.messageCallback(decodedMessage)));
 
             socket.on('timeout', () => {
                 socket.destroy();
@@ -670,7 +670,7 @@ class DNSProxy {
 
             });
 
-            connection.on('data', createTCPReadHandler((decodedMessage) => {
+            connection.on('data', createTCPDataHandler((decodedMessage) => {
                 this.handleServerSocketMessage(decodedMessage, ClientRemoteInfo.createTCP(connection))
             }));
 
