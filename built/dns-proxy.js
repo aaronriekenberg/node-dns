@@ -378,12 +378,8 @@ class DNSProxy {
         this.getNextTCPRemoteServerConnection = this.buildRemoteServerConnectionGetter(this.tcpRemoteServerConnections);
         this.udpServerSocket = createUDPSocket(configuration.udpSocketBufferSizes);
         (configuration.remoteAddressesAndPorts || []).forEach((remoteAddressAndPort) => {
-            this.udpRemoteServerConnections.push(new UDPRemoteServerConnection(remoteAddressAndPort, (decodedMessage) => {
-                this.handleRemoteSocketMessage(decodedMessage);
-            }, configuration.udpSocketBufferSizes));
-            this.tcpRemoteServerConnections.push(new TCPRemoteServerConnection(configuration.tcpConnectionTimeoutSeconds * 1000, remoteAddressAndPort, (decodedMessage) => {
-                this.handleRemoteSocketMessage(decodedMessage);
-            }));
+            this.udpRemoteServerConnections.push(new UDPRemoteServerConnection(remoteAddressAndPort, (decodedMessage) => this.handleRemoteSocketMessage(decodedMessage), configuration.udpSocketBufferSizes));
+            this.tcpRemoteServerConnections.push(new TCPRemoteServerConnection(configuration.tcpConnectionTimeoutSeconds * 1000, remoteAddressAndPort, (decodedMessage) => this.handleRemoteSocketMessage(decodedMessage)));
         });
         if (configuration.remoteHttp2Configuration) {
             this.http2RemoteServerConnection = new Http2RemoteServerConnection(configuration.remoteHttp2Configuration.url, configuration.remoteHttp2Configuration.path, configuration.remoteHttp2Configuration.sessionTimeoutSeconds * 1000, configuration.remoteHttp2Configuration.requestTimeoutSeconds * 1000, (decodedMessage) => this.handleRemoteSocketMessage(decodedMessage));

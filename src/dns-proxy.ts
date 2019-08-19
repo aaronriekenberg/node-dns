@@ -470,17 +470,13 @@ class DNSProxy {
             this.udpRemoteServerConnections.push(
                 new UDPRemoteServerConnection(
                     remoteAddressAndPort,
-                    (decodedMessage) => {
-                        this.handleRemoteSocketMessage(decodedMessage);
-                    },
+                    (decodedMessage) => this.handleRemoteSocketMessage(decodedMessage),
                     configuration.udpSocketBufferSizes));
             this.tcpRemoteServerConnections.push(
                 new TCPRemoteServerConnection(
                     configuration.tcpConnectionTimeoutSeconds * 1000,
                     remoteAddressAndPort,
-                    (decodedMessage) => {
-                        this.handleRemoteSocketMessage(decodedMessage);
-                    }));
+                    (decodedMessage) => this.handleRemoteSocketMessage(decodedMessage)));
         });
 
         if (configuration.remoteHttp2Configuration) {
