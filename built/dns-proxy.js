@@ -15,6 +15,7 @@ const expiring_cache_1 = __importDefault(require("./expiring-cache"));
 const dnsPacket = __importStar(require("dns-packet"));
 const dgram = __importStar(require("dgram"));
 const fs = __importStar(require("fs"));
+const http2 = __importStar(require("http2"));
 const net = __importStar(require("net"));
 const process = __importStar(require("process"));
 const winston = __importStar(require("winston"));
@@ -261,6 +262,61 @@ class TCPRemoteServerConnection {
         }
     }
 }
+class Http2RemoteServerConnection {
+    constructor(messageCallback) {
+        this.messageCallback = messageCallback;
+        this.clientHttp2Session = null;
+    }
+    writeRequest(dnsRequest) {
+        this.createSessionIfNecessary();
+        if (this.clientHttp2Session) {
+            const outgoingRequestBuffer = dnsPacket.encode(dnsRequest);
+            const request = this.clientHttp2Session.request({
+                'content-type': 'application/dns-message',
+                'content-length': outgoingRequestBuffer.length,
+                'accept': 'application/dns-message',
+                ':method': 'POST',
+                ':path': '/dns-query'
+            });
+            const responseChunks = [];
+            request.on('data', (chunk) => {
+                responseChunks.push(chunk);
+            });
+            request.on('error', (error) => {
+                logger.warn(`request error error = ${error}`);
+            });
+            request.on('end', () => {
+                logger.info(`request end responseChunks.length = ${responseChunks.length}`);
+                const responseBuffer = Buffer.concat(responseChunks);
+                const response = dnsPacket.decode(responseBuffer);
+                //logger.info(`response = ${stringifyPretty(response)}`);
+                this.messageCallback(response);
+            });
+            request.end(outgoingRequestBuffer);
+            logger.info('after request.end');
+        }
+    }
+    createSessionIfNecessary() {
+        logger.info("begin createSessionIfNecessary");
+        if (this.clientHttp2Session) {
+            return;
+        }
+        const clientHttp2Session = http2.connect('https://dns.google');
+        logger.info(`created clientHttp2Session connecting = ${clientHttp2Session.connecting}`);
+        clientHttp2Session.on('connect', (session, socket) => {
+            logger.info(`clientHttp2Session on connect session.connecting = ${session.connecting}`);
+        });
+        clientHttp2Session.on('close', () => {
+            logger.info(`clientHttp2Session on close`);
+            this.clientHttp2Session = null;
+        });
+        clientHttp2Session.on('error', (error) => {
+            logger.info(`clientHttp2Session on error error = ${error}`);
+            clientHttp2Session.destroy();
+        });
+        this.clientHttp2Session = clientHttp2Session;
+    }
+}
 class RequestProtocolMetrics {
     constructor() {
         this.udp = 0;
@@ -298,6 +354,7 @@ class DNSProxy {
                 this.handleRemoteSocketMessage(decodedMessage);
             }));
         });
+        this.http2RemoteServerConnection = new Http2RemoteServerConnection((decodedMessage) => this.handleRemoteSocketMessage(decodedMessage));
     }
     getQuestionCacheKey(questions) {
         let key = '';
@@ -440,14 +497,14 @@ class DNSProxy {
             const outgoingRequestInfo = new OutgoingRequestInfo(clientRemoteInfo, decodedRequestObject.id, questionCacheKey);
             this.outgoingRequestCache.add(outgoingRequestID, outgoingRequestInfo, expirationTimeSeconds);
             decodedRequestObject.id = outgoingRequestID;
-            if (clientRemoteInfo.isUDP) {
-                ++this.metrics.remoteRequests.udp;
-                this.getNextUDPRemoteServerConnection().writeRequest(decodedRequestObject);
-            }
-            else {
-                ++this.metrics.remoteRequests.tcp;
-                this.getNextTCPRemoteServerConnection().writeRequest(decodedRequestObject);
-            }
+            this.http2RemoteServerConnection.writeRequest(decodedRequestObject);
+            // if (clientRemoteInfo.isUDP) {
+            //     ++this.metrics.remoteRequests.udp;
+            //     this.getNextUDPRemoteServerConnection().writeRequest(decodedRequestObject);
+            // } else {
+            //     ++this.metrics.remoteRequests.tcp;
+            //     this.getNextTCPRemoteServerConnection().writeRequest(decodedRequestObject);
+            // }
         }
     }
     handleRemoteSocketMessage(decodedResponseObject) {

@@ -5,6 +5,7 @@ import ExpiringCache from './expiring-cache';
 import * as dnsPacket from 'dns-packet';
 import * as dgram from 'dgram';
 import * as fs from 'fs';
+import * as http2 from 'http2';
 import * as net from 'net';
 import * as process from 'process';
 import * as winston from 'winston';
@@ -316,6 +317,80 @@ class TCPRemoteServerConnection implements RemoteServerConnection {
 
 }
 
+class Http2RemoteServerConnection implements RemoteServerConnection {
+
+    private clientHttp2Session: http2.ClientHttp2Session | null = null;
+
+    constructor(
+        private readonly messageCallback: (decodedMessage: dnsPacket.DNSPacket) => void) {
+
+    }
+
+    writeRequest(dnsRequest: dnsPacket.DNSPacket): void {
+        this.createSessionIfNecessary();
+
+        if (this.clientHttp2Session) {
+            const outgoingRequestBuffer = dnsPacket.encode(dnsRequest);
+
+            const request = this.clientHttp2Session.request({
+                'content-type': 'application/dns-message',
+                'content-length': outgoingRequestBuffer.length,
+                'accept': 'application/dns-message',
+                ':method': 'POST',
+                ':path': '/dns-query'
+            });
+
+            const responseChunks: Buffer[] = [];
+            request.on('data', (chunk: Buffer) => {
+                responseChunks.push(chunk);
+            });
+
+            request.on('error', (error) => {
+                logger.warn(`request error error = ${error}`);
+            });
+
+            request.on('end', () => {
+                logger.info(`request end responseChunks.length = ${responseChunks.length}`);
+
+                const responseBuffer = Buffer.concat(responseChunks);
+                const response = dnsPacket.decode(responseBuffer);
+                //logger.info(`response = ${stringifyPretty(response)}`);
+                this.messageCallback(response);
+            });
+
+            request.end(outgoingRequestBuffer);
+            logger.info('after request.end');
+        }
+    }
+
+    private createSessionIfNecessary() {
+        logger.info("begin createSessionIfNecessary");
+
+        if (this.clientHttp2Session) {
+            return;
+        }
+
+        const clientHttp2Session = http2.connect('https://dns.google');
+        logger.info(`created clientHttp2Session connecting = ${clientHttp2Session.connecting}`);
+
+        clientHttp2Session.on('connect', (session, socket) => {
+            logger.info(`clientHttp2Session on connect session.connecting = ${session.connecting}`);
+        });
+
+        clientHttp2Session.on('close', () => {
+            logger.info(`clientHttp2Session on close`);
+            this.clientHttp2Session = null;
+        });
+
+        clientHttp2Session.on('error', (error) => {
+            logger.info(`clientHttp2Session on error error = ${error}`);
+            clientHttp2Session.destroy();
+        });
+
+        this.clientHttp2Session = clientHttp2Session;
+    }
+}
+
 class RequestProtocolMetrics {
     udp: number = 0;
     tcp: number = 0;
@@ -350,6 +425,8 @@ class DNSProxy {
 
     private readonly tcpRemoteServerConnections: TCPRemoteServerConnection[] = [];
 
+    private readonly http2RemoteServerConnection: Http2RemoteServerConnection;
+
     constructor(private readonly configuration: configuration.Configuration) {
         this.udpServerSocket = createUDPSocket(configuration.udpSocketBufferSizes);
 
@@ -369,6 +446,9 @@ class DNSProxy {
                         this.handleRemoteSocketMessage(decodedMessage);
                     }));
         });
+
+        this.http2RemoteServerConnection = new Http2RemoteServerConnection(
+            (decodedMessage) => this.handleRemoteSocketMessage(decodedMessage));
     }
 
     private getQuestionCacheKey(questions?: dnsPacket.DNSQuestion[]): string {
@@ -499,6 +579,7 @@ class DNSProxy {
         logger.info(`end timer pop ${stringify(logData)}`);
     }
 
+
     private handleServerSocketMessage(decodedRequestObject: dnsPacket.DNSPacket, clientRemoteInfo: ClientRemoteInfo) {
         // logger.info(`serverSocket message remoteInfo = ${stringifyPretty(clientRemoteInfo)}\ndecodedRequestObject = ${stringifyPretty(decodedRequestObject)}`);
 
@@ -561,13 +642,15 @@ class DNSProxy {
 
             decodedRequestObject.id = outgoingRequestID;
 
-            if (clientRemoteInfo.isUDP) {
-                ++this.metrics.remoteRequests.udp;
-                this.getNextUDPRemoteServerConnection().writeRequest(decodedRequestObject);
-            } else {
-                ++this.metrics.remoteRequests.tcp;
-                this.getNextTCPRemoteServerConnection().writeRequest(decodedRequestObject);
-            }
+            this.http2RemoteServerConnection.writeRequest(decodedRequestObject);
+
+            // if (clientRemoteInfo.isUDP) {
+            //     ++this.metrics.remoteRequests.udp;
+            //     this.getNextUDPRemoteServerConnection().writeRequest(decodedRequestObject);
+            // } else {
+            //     ++this.metrics.remoteRequests.tcp;
+            //     this.getNextTCPRemoteServerConnection().writeRequest(decodedRequestObject);
+            // }
         }
     }
 
