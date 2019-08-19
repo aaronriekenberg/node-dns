@@ -86,6 +86,16 @@ const streamDecodeDNSPacket = (buffer) => {
     }
     return packet;
 };
+const encodeDNSPacket = (packet) => {
+    let buffer;
+    try {
+        buffer = dnsPacket.encode(packet);
+    }
+    catch (err) {
+        logger.error(`encodeDNSPacket error err = ${formatError(err)}`);
+    }
+    return buffer;
+};
 const decodeDNSPacket = (buffer) => {
     let packet;
     try {
@@ -262,15 +272,24 @@ class TCPRemoteServerConnection {
         }
     }
 }
+// https://tools.ietf.org/html/rfc8484
 class Http2RemoteServerConnection {
     constructor(messageCallback) {
         this.messageCallback = messageCallback;
         this.clientHttp2Session = null;
+        this.sessionTimeoutMilliseconds = 120 * 1000;
+        this.requestTimeoutMilliseconds = 5 * 1000;
     }
     writeRequest(dnsRequest) {
+        const originalID = dnsRequest.id;
+        dnsRequest.id = 0;
+        const outgoingRequestBuffer = encodeDNSPacket(dnsRequest);
+        if (!outgoingRequestBuffer) {
+            return;
+        }
         this.createSessionIfNecessary();
-        if (this.clientHttp2Session) {
-            const outgoingRequestBuffer = dnsPacket.encode(dnsRequest);
+        if (this.clientHttp2Session &&
+            (!this.clientHttp2Session.destroyed)) {
             const request = this.clientHttp2Session.request({
                 'content-type': 'application/dns-message',
                 'content-length': outgoingRequestBuffer.length,
@@ -285,19 +304,25 @@ class Http2RemoteServerConnection {
             request.on('error', (error) => {
                 logger.warn(`request error error = ${error}`);
             });
+            request.setTimeout(this.requestTimeoutMilliseconds);
+            request.on('timeout', () => {
+                logger.warn(`request timeout`);
+            });
             request.on('end', () => {
                 logger.info(`request end responseChunks.length = ${responseChunks.length}`);
                 const responseBuffer = Buffer.concat(responseChunks);
-                const response = dnsPacket.decode(responseBuffer);
-                //logger.info(`response = ${stringifyPretty(response)}`);
-                this.messageCallback(response);
+                const response = decodeDNSPacket(responseBuffer);
+                if (response) {
+                    response.id = originalID;
+                    //logger.info(`response = ${stringifyPretty(response)}`);
+                    this.messageCallback(response);
+                }
             });
             request.end(outgoingRequestBuffer);
             logger.info('after request.end');
         }
     }
     createSessionIfNecessary() {
-        logger.info("begin createSessionIfNecessary");
         if (this.clientHttp2Session) {
             return;
         }
@@ -314,6 +339,11 @@ class Http2RemoteServerConnection {
             logger.info(`clientHttp2Session on error error = ${error}`);
             clientHttp2Session.destroy();
         });
+        clientHttp2Session.on('timeout', () => {
+            logger.info(`clientHttp2Session on timeout`);
+            clientHttp2Session.destroy();
+        });
+        clientHttp2Session.setTimeout(this.sessionTimeoutMilliseconds);
         this.clientHttp2Session = clientHttp2Session;
     }
 }
