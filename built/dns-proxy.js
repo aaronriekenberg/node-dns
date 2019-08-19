@@ -304,24 +304,23 @@ class Http2RemoteServerConnection {
                 responseChunks.push(chunk);
             });
             request.on('error', (error) => {
-                logger.warn(`request error error = ${error}`);
+                logger.warn(`request error error = ${formatError(error)}`);
             });
             request.setTimeout(this.requestTimeoutMilliseconds);
             request.on('timeout', () => {
-                logger.warn(`request timeout`);
+                logger.warn('http2 request timeout');
             });
             request.on('end', () => {
-                logger.info(`request end responseChunks.length = ${responseChunks.length}`);
-                const responseBuffer = Buffer.concat(responseChunks);
-                const response = decodeDNSPacket(responseBuffer);
-                if (response) {
-                    response.id = originalID;
-                    //logger.info(`response = ${stringifyPretty(response)}`);
-                    this.messageCallback(response);
+                if (responseChunks.length > 0) {
+                    const responseBuffer = Buffer.concat(responseChunks);
+                    const response = decodeDNSPacket(responseBuffer);
+                    if (response) {
+                        response.id = originalID;
+                        this.messageCallback(response);
+                    }
                 }
             });
             request.end(outgoingRequestBuffer);
-            logger.info('after request.end');
         }
     }
     createSessionIfNecessary() {
@@ -329,16 +328,15 @@ class Http2RemoteServerConnection {
             return;
         }
         const clientHttp2Session = http2.connect(this.url);
-        logger.info(`created clientHttp2Session connecting = ${clientHttp2Session.connecting}`);
-        clientHttp2Session.on('connect', (session, socket) => {
-            logger.info(`clientHttp2Session on connect session.connecting = ${session.connecting}`);
+        clientHttp2Session.on('connect', () => {
+            logger.info('clientHttp2Session on connect');
         });
         clientHttp2Session.on('close', () => {
             logger.info(`clientHttp2Session on close`);
             this.clientHttp2Session = null;
         });
         clientHttp2Session.on('error', (error) => {
-            logger.info(`clientHttp2Session on error error = ${error}`);
+            logger.info(`clientHttp2Session on error error = ${formatError(error)}`);
             clientHttp2Session.destroy();
         });
         clientHttp2Session.on('timeout', () => {
