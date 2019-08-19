@@ -7,7 +7,7 @@
         "url": "https://dns.google",
         "path": "/dns-query",
         "sessionTimeoutSeconds": 300,
-        "requestTimeoutSeconds": 5
+        "requestTimeoutSeconds": 2
     },
     "minTTLSeconds": 300,
     "maxTTLSeconds": 3600,
