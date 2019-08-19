@@ -10,10 +10,18 @@ export interface AddressAndPort {
     readonly port: number
 }
 
+export interface RemoteHttp2Configuration {
+    readonly url: string,
+    readonly path: string,
+    readonly sessionTimeoutSeconds: number,
+    readonly requestTimeoutSeconds: number
+}
+
 export interface Configuration {
     readonly udpSocketBufferSizes?: SocketBufferSizes;
     readonly listenAddressAndPort: AddressAndPort;
-    readonly remoteAddressesAndPorts: AddressAndPort[];
+    readonly remoteAddressesAndPorts?: AddressAndPort[];
+    readonly remoteHttp2Configuration?: RemoteHttp2Configuration;
     readonly minTTLSeconds: number;
     readonly maxTTLSeconds: number;
     readonly requestTimeoutSeconds: number;

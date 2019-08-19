@@ -3,16 +3,12 @@
         "address": "127.0.0.1",
         "port": 10053
     },
-    "remoteAddressesAndPorts": [
-        {
-            "address": "8.8.8.8",
-            "port": 53
-        },
-        {
-            "address": "8.8.4.4",
-            "port": 53
-        }
-    ],
+    "remoteHttp2Configuration": {
+        "url": "https://dns.google",
+        "path": "/dns-query",
+        "sessionTimeoutSeconds": 300,
+        "requestTimeoutSeconds": 5
+    },
     "minTTLSeconds": 300,
     "maxTTLSeconds": 3600,
     "requestTimeoutSeconds": 10,
