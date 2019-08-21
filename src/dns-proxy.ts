@@ -486,7 +486,7 @@ class RemoteRequestRouter {
                     messageCallback));
         });
 
-        const buildRoundRobinGetter = (list: RemoteServerConnection[]): (() => RemoteServerConnection) => {
+        const buildRoundRobinGetter = <T>(list: T[]): (() => T) => {
             let nextIndex = 0;
             return () => {
                 if (nextIndex >= list.length) {
