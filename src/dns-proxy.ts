@@ -441,6 +441,96 @@ class Metrics {
     responseQuestionCacheKeyMismatch: number = 0;
 }
 
+type RemoteRequestRouterFunction = (clientRemoteInfo: ClientRemoteInfo, request: dnsPacket.DNSPacket) => void;
+
+class RemoteRequestRouter {
+
+    readonly routeRemoteRequest: RemoteRequestRouterFunction;
+
+    constructor(
+        configuration: configuration.Configuration,
+        metrics: Metrics,
+        messageCallback: (decodedMessage: dnsPacket.DNSPacket) => void) {
+
+        if (configuration.remoteAddressesAndPorts) {
+            this.routeRemoteRequest = this.buildTCPAndUDPRemoteRequestRouter(configuration, metrics, messageCallback);
+        }
+
+        else if (configuration.remoteHttp2Configuration) {
+            this.routeRemoteRequest = this.buildHttp2RemoteRequestRouter(configuration.remoteHttp2Configuration, metrics, messageCallback);
+        }
+
+        else {
+            throw new Error('must have one of remoteAddressesAndPorts or remoteHttp2Configuration defined in configurartion');
+        }
+    }
+
+    private buildTCPAndUDPRemoteRequestRouter(
+        configuration: configuration.Configuration,
+        metrics: Metrics,
+        messageCallback: (decodedMessage: dnsPacket.DNSPacket) => void): RemoteRequestRouterFunction {
+
+        const udpRemoteServerConnections: UDPRemoteServerConnection[] = [];
+        const tcpRemoteServerConnections: TCPRemoteServerConnection[] = [];
+
+        (configuration.remoteAddressesAndPorts || []).forEach((remoteAddressAndPort) => {
+            udpRemoteServerConnections.push(
+                new UDPRemoteServerConnection(
+                    remoteAddressAndPort,
+                    messageCallback,
+                    configuration.udpSocketBufferSizes));
+            tcpRemoteServerConnections.push(
+                new TCPRemoteServerConnection(
+                    configuration.tcpConnectionTimeoutSeconds * 1000,
+                    remoteAddressAndPort,
+                    messageCallback));
+        });
+
+        const buildRoundRobinGetter = (list: RemoteServerConnection[]): (() => RemoteServerConnection) => {
+            let nextIndex = 0;
+            return () => {
+                if (nextIndex >= list.length) {
+                    nextIndex = 0;
+                }
+                const retVal = list[nextIndex];
+                ++nextIndex;
+                return retVal;
+            }
+        };
+
+        const getNextUDPRemoteServerConnection = buildRoundRobinGetter(udpRemoteServerConnections);
+        const getNextTCPRemoteServerConnection = buildRoundRobinGetter(tcpRemoteServerConnections);
+
+        return (clientRemoteInfo: ClientRemoteInfo, request: dnsPacket.DNSPacket) => {
+            if (clientRemoteInfo.isUDP) {
+                ++metrics.remoteRequests.udp;
+                getNextUDPRemoteServerConnection().writeRequest(request);
+            } else {
+                ++metrics.remoteRequests.tcp;
+                getNextTCPRemoteServerConnection().writeRequest(request);
+            }
+        };
+    }
+
+    private buildHttp2RemoteRequestRouter(
+        remoteHttp2Configuration: configuration.RemoteHttp2Configuration,
+        metrics: Metrics,
+        messageCallback: (decodedMessage: dnsPacket.DNSPacket) => void): RemoteRequestRouterFunction {
+        const http2RemoteServerConnection = new Http2RemoteServerConnection(
+            remoteHttp2Configuration.url,
+            remoteHttp2Configuration.path,
+            remoteHttp2Configuration.sessionTimeoutSeconds * 1000,
+            remoteHttp2Configuration.requestTimeoutSeconds * 1000,
+            messageCallback);
+
+        return (clientRemoteInfo: ClientRemoteInfo, request: dnsPacket.DNSPacket) => {
+            ++metrics.remoteRequests.http2;
+            http2RemoteServerConnection.writeRequest(request);
+        };
+    }
+
+}
+
 class DNSProxy {
 
     private static readonly originalTTLSymbol = Symbol('originalTTL');
@@ -455,38 +545,18 @@ class DNSProxy {
 
     private readonly udpServerSocket: dgram.Socket;
 
-    private readonly tcpServerSocket = net.createServer();
+    private readonly tcpServerSocket: net.Server;
 
-    private readonly udpRemoteServerConnections: UDPRemoteServerConnection[] = [];
-
-    private readonly tcpRemoteServerConnections: TCPRemoteServerConnection[] = [];
-
-    private readonly http2RemoteServerConnection?: Http2RemoteServerConnection;
+    private readonly remoteRequestRouter: RemoteRequestRouter;
 
     constructor(private readonly configuration: configuration.Configuration) {
         this.udpServerSocket = createUDPSocket(configuration.udpSocketBufferSizes);
+        this.tcpServerSocket = net.createServer();
 
-        (configuration.remoteAddressesAndPorts || []).forEach((remoteAddressAndPort) => {
-            this.udpRemoteServerConnections.push(
-                new UDPRemoteServerConnection(
-                    remoteAddressAndPort,
-                    (decodedMessage) => this.handleRemoteSocketMessage(decodedMessage),
-                    configuration.udpSocketBufferSizes));
-            this.tcpRemoteServerConnections.push(
-                new TCPRemoteServerConnection(
-                    configuration.tcpConnectionTimeoutSeconds * 1000,
-                    remoteAddressAndPort,
-                    (decodedMessage) => this.handleRemoteSocketMessage(decodedMessage)));
-        });
-
-        if (configuration.remoteHttp2Configuration) {
-            this.http2RemoteServerConnection = new Http2RemoteServerConnection(
-                configuration.remoteHttp2Configuration.url,
-                configuration.remoteHttp2Configuration.path,
-                configuration.remoteHttp2Configuration.sessionTimeoutSeconds * 1000,
-                configuration.remoteHttp2Configuration.requestTimeoutSeconds * 1000,
-                (decodedMessage) => this.handleRemoteSocketMessage(decodedMessage));
-        }
+        this.remoteRequestRouter = new RemoteRequestRouter(
+            configuration,
+            this.metrics,
+            (decodedMessage) => this.handleRemoteSocketMessage(decodedMessage));
     }
 
     private getQuestionCacheKey(questions?: dnsPacket.DNSQuestion[]): string {
@@ -509,39 +579,6 @@ class DNSProxy {
             return Math.floor(Math.random() * (max - min + 1)) + min;
         };
         return getRandomIntInclusive(1, 65534);
-    }
-
-    private buildRemoteServerConnectionGetter(list: RemoteServerConnection[]): () => RemoteServerConnection {
-        let nextIndex = 0;
-        return () => {
-            if (nextIndex >= list.length) {
-                nextIndex = 0;
-            }
-            const retVal = list[nextIndex];
-            ++nextIndex;
-            return retVal;
-        }
-    }
-
-    private readonly getNextUDPRemoteServerConnection = this.buildRemoteServerConnectionGetter(this.udpRemoteServerConnections);
-
-    private readonly getNextTCPRemoteServerConnection = this.buildRemoteServerConnectionGetter(this.tcpRemoteServerConnections);
-
-    private routeRemoteRequest(clientRemoteInfo: ClientRemoteInfo, request: dnsPacket.DNSPacket) {
-        if (this.http2RemoteServerConnection) {
-            ++this.metrics.remoteRequests.http2;
-            this.http2RemoteServerConnection.writeRequest(request);
-        }
-
-        else {
-            if (clientRemoteInfo.isUDP) {
-                ++this.metrics.remoteRequests.udp;
-                this.getNextUDPRemoteServerConnection().writeRequest(request);
-            } else {
-                ++this.metrics.remoteRequests.tcp;
-                this.getNextTCPRemoteServerConnection().writeRequest(request);
-            }
-        }
     }
 
     private buildFixedResponses() {
@@ -696,7 +733,7 @@ class DNSProxy {
 
             decodedRequestObject.id = outgoingRequestID;
 
-            this.routeRemoteRequest(clientRemoteInfo, decodedRequestObject);
+            this.remoteRequestRouter.routeRemoteRequest(clientRemoteInfo, decodedRequestObject);
         }
     }
 

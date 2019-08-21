@@ -364,6 +364,57 @@ class Metrics {
         this.responseQuestionCacheKeyMismatch = 0;
     }
 }
+class RemoteRequestRouter {
+    constructor(configuration, metrics, messageCallback) {
+        if (configuration.remoteAddressesAndPorts) {
+            this.routeRemoteRequest = this.buildTCPAndUDPRemoteRequestRouter(configuration, metrics, messageCallback);
+        }
+        else if (configuration.remoteHttp2Configuration) {
+            this.routeRemoteRequest = this.buildHttp2RemoteRequestRouter(configuration.remoteHttp2Configuration, metrics, messageCallback);
+        }
+        else {
+            throw new Error('must have one of remoteAddressesAndPorts or remoteHttp2Configuration defined in configurartion');
+        }
+    }
+    buildTCPAndUDPRemoteRequestRouter(configuration, metrics, messageCallback) {
+        const udpRemoteServerConnections = [];
+        const tcpRemoteServerConnections = [];
+        (configuration.remoteAddressesAndPorts || []).forEach((remoteAddressAndPort) => {
+            udpRemoteServerConnections.push(new UDPRemoteServerConnection(remoteAddressAndPort, messageCallback, configuration.udpSocketBufferSizes));
+            tcpRemoteServerConnections.push(new TCPRemoteServerConnection(configuration.tcpConnectionTimeoutSeconds * 1000, remoteAddressAndPort, messageCallback));
+        });
+        const buildRoundRobinGetter = (list) => {
+            let nextIndex = 0;
+            return () => {
+                if (nextIndex >= list.length) {
+                    nextIndex = 0;
+                }
+                const retVal = list[nextIndex];
+                ++nextIndex;
+                return retVal;
+            };
+        };
+        const getNextUDPRemoteServerConnection = buildRoundRobinGetter(udpRemoteServerConnections);
+        const getNextTCPRemoteServerConnection = buildRoundRobinGetter(tcpRemoteServerConnections);
+        return (clientRemoteInfo, request) => {
+            if (clientRemoteInfo.isUDP) {
+                ++metrics.remoteRequests.udp;
+                getNextUDPRemoteServerConnection().writeRequest(request);
+            }
+            else {
+                ++metrics.remoteRequests.tcp;
+                getNextTCPRemoteServerConnection().writeRequest(request);
+            }
+        };
+    }
+    buildHttp2RemoteRequestRouter(remoteHttp2Configuration, metrics, messageCallback) {
+        const http2RemoteServerConnection = new Http2RemoteServerConnection(remoteHttp2Configuration.url, remoteHttp2Configuration.path, remoteHttp2Configuration.sessionTimeoutSeconds * 1000, remoteHttp2Configuration.requestTimeoutSeconds * 1000, messageCallback);
+        return (clientRemoteInfo, request) => {
+            ++metrics.remoteRequests.http2;
+            http2RemoteServerConnection.writeRequest(request);
+        };
+    }
+}
 class DNSProxy {
     constructor(configuration) {
         this.configuration = configuration;
@@ -371,19 +422,9 @@ class DNSProxy {
         this.questionToFixedResponse = new Map();
         this.outgoingRequestCache = new expiring_cache_1.default();
         this.questionToResponseCache = new expiring_cache_1.default();
-        this.tcpServerSocket = net.createServer();
-        this.udpRemoteServerConnections = [];
-        this.tcpRemoteServerConnections = [];
-        this.getNextUDPRemoteServerConnection = this.buildRemoteServerConnectionGetter(this.udpRemoteServerConnections);
-        this.getNextTCPRemoteServerConnection = this.buildRemoteServerConnectionGetter(this.tcpRemoteServerConnections);
         this.udpServerSocket = createUDPSocket(configuration.udpSocketBufferSizes);
-        (configuration.remoteAddressesAndPorts || []).forEach((remoteAddressAndPort) => {
-            this.udpRemoteServerConnections.push(new UDPRemoteServerConnection(remoteAddressAndPort, (decodedMessage) => this.handleRemoteSocketMessage(decodedMessage), configuration.udpSocketBufferSizes));
-            this.tcpRemoteServerConnections.push(new TCPRemoteServerConnection(configuration.tcpConnectionTimeoutSeconds * 1000, remoteAddressAndPort, (decodedMessage) => this.handleRemoteSocketMessage(decodedMessage)));
-        });
-        if (configuration.remoteHttp2Configuration) {
-            this.http2RemoteServerConnection = new Http2RemoteServerConnection(configuration.remoteHttp2Configuration.url, configuration.remoteHttp2Configuration.path, configuration.remoteHttp2Configuration.sessionTimeoutSeconds * 1000, configuration.remoteHttp2Configuration.requestTimeoutSeconds * 1000, (decodedMessage) => this.handleRemoteSocketMessage(decodedMessage));
-        }
+        this.tcpServerSocket = net.createServer();
+        this.remoteRequestRouter = new RemoteRequestRouter(configuration, this.metrics, (decodedMessage) => this.handleRemoteSocketMessage(decodedMessage));
     }
     getQuestionCacheKey(questions) {
         let key = '';
@@ -402,33 +443,6 @@ class DNSProxy {
             return Math.floor(Math.random() * (max - min + 1)) + min;
         };
         return getRandomIntInclusive(1, 65534);
-    }
-    buildRemoteServerConnectionGetter(list) {
-        let nextIndex = 0;
-        return () => {
-            if (nextIndex >= list.length) {
-                nextIndex = 0;
-            }
-            const retVal = list[nextIndex];
-            ++nextIndex;
-            return retVal;
-        };
-    }
-    routeRemoteRequest(clientRemoteInfo, request) {
-        if (this.http2RemoteServerConnection) {
-            ++this.metrics.remoteRequests.http2;
-            this.http2RemoteServerConnection.writeRequest(request);
-        }
-        else {
-            if (clientRemoteInfo.isUDP) {
-                ++this.metrics.remoteRequests.udp;
-                this.getNextUDPRemoteServerConnection().writeRequest(request);
-            }
-            else {
-                ++this.metrics.remoteRequests.tcp;
-                this.getNextTCPRemoteServerConnection().writeRequest(request);
-            }
-        }
     }
     buildFixedResponses() {
         (this.configuration.fixedResponses || []).forEach((fixedResponse) => {
@@ -542,7 +556,7 @@ class DNSProxy {
             const outgoingRequestInfo = new OutgoingRequestInfo(clientRemoteInfo, decodedRequestObject.id, questionCacheKey);
             this.outgoingRequestCache.add(outgoingRequestID, outgoingRequestInfo, expirationTimeSeconds);
             decodedRequestObject.id = outgoingRequestID;
-            this.routeRemoteRequest(clientRemoteInfo, decodedRequestObject);
+            this.remoteRequestRouter.routeRemoteRequest(clientRemoteInfo, decodedRequestObject);
         }
     }
     handleRemoteSocketMessage(decodedResponseObject) {
