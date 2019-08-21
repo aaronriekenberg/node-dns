@@ -424,7 +424,7 @@ class DNSProxy {
         this.questionToResponseCache = new expiring_cache_1.default();
         this.udpServerSocket = createUDPSocket(configuration.udpSocketBufferSizes);
         this.tcpServerSocket = net.createServer();
-        this.remoteRequestRouter = new RemoteRequestRouter(configuration, this.metrics, (decodedMessage) => this.handleRemoteSocketMessage(decodedMessage));
+        this.remoteRequestRouter = new RemoteRequestRouter(configuration, this.metrics, (decodedMessage) => this.handleRemoteMessage(decodedMessage));
     }
     getQuestionCacheKey(questions) {
         let key = '';
@@ -516,10 +516,10 @@ class DNSProxy {
         };
         logger.info(`end timer pop ${stringify(logData)}`);
     }
-    handleServerSocketMessage(decodedRequestObject, clientRemoteInfo) {
-        // logger.info(`serverSocket message remoteInfo = ${stringifyPretty(clientRemoteInfo)}\ndecodedRequestObject = ${stringifyPretty(decodedRequestObject)}`);
+    handleLocalMessage(decodedRequestObject, clientRemoteInfo) {
+        // logger.info(`handleLocalMessage message remoteInfo = ${stringifyPretty(clientRemoteInfo)}\ndecodedRequestObject = ${stringifyPretty(decodedRequestObject)}`);
         if ((!isNumber(decodedRequestObject.id)) || (!decodedRequestObject.questions)) {
-            logger.warn(`handleServerSocketMessage invalid decodedRequestObject ${decodedRequestObject}`);
+            logger.warn(`handleLocalMessage invalid decodedRequestObject ${decodedRequestObject}`);
             return;
         }
         if (clientRemoteInfo.isUDP) {
@@ -559,8 +559,8 @@ class DNSProxy {
             this.remoteRequestRouter.routeRemoteRequest(clientRemoteInfo, decodedRequestObject);
         }
     }
-    handleRemoteSocketMessage(decodedResponseObject) {
-        // logger.info(`remoteSocket message decodedResponseObject = ${stringifyPretty(decodedResponseObject)}`);
+    handleRemoteMessage(decodedResponseObject) {
+        // logger.info(`handleRemoteMessage decodedResponseObject = ${stringifyPretty(decodedResponseObject)}`);
         if (!isNumber(decodedResponseObject.id) || (!decodedResponseObject.questions)) {
             logger.warn(`handleRemoteSocketMessage invalid decodedResponseObject ${decodedResponseObject}`);
             return;
@@ -604,7 +604,7 @@ class DNSProxy {
         this.udpServerSocket.on('message', (message, remoteInfo) => {
             const decodedMessage = decodeDNSPacket(message);
             if (decodedMessage) {
-                this.handleServerSocketMessage(decodedMessage, ClientRemoteInfo.createUDP(this.udpServerSocket, remoteInfo));
+                this.handleLocalMessage(decodedMessage, ClientRemoteInfo.createUDP(this.udpServerSocket, remoteInfo));
             }
         });
         this.udpServerSocket.bind(this.configuration.listenAddressAndPort.port, this.configuration.listenAddressAndPort.address);
@@ -627,7 +627,7 @@ class DNSProxy {
             connection.on('close', () => {
             });
             connection.on('data', createTCPDataHandler((decodedMessage) => {
-                this.handleServerSocketMessage(decodedMessage, ClientRemoteInfo.createTCP(connection));
+                this.handleLocalMessage(decodedMessage, ClientRemoteInfo.createTCP(connection));
             }));
             connection.on('timeout', () => {
                 connection.destroy();

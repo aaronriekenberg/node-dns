@@ -557,7 +557,7 @@ class DNSProxy {
         this.remoteRequestRouter = new RemoteRequestRouter(
             configuration,
             this.metrics,
-            (decodedMessage) => this.handleRemoteSocketMessage(decodedMessage));
+            (decodedMessage) => this.handleRemoteMessage(decodedMessage));
     }
 
     private getQuestionCacheKey(questions?: dnsPacket.DNSQuestion[]): string {
@@ -672,11 +672,11 @@ class DNSProxy {
         logger.info(`end timer pop ${stringify(logData)}`);
     }
 
-    private handleServerSocketMessage(decodedRequestObject: dnsPacket.DNSPacket, clientRemoteInfo: ClientRemoteInfo) {
-        // logger.info(`serverSocket message remoteInfo = ${stringifyPretty(clientRemoteInfo)}\ndecodedRequestObject = ${stringifyPretty(decodedRequestObject)}`);
+    private handleLocalMessage(decodedRequestObject: dnsPacket.DNSPacket, clientRemoteInfo: ClientRemoteInfo) {
+        // logger.info(`handleLocalMessage message remoteInfo = ${stringifyPretty(clientRemoteInfo)}\ndecodedRequestObject = ${stringifyPretty(decodedRequestObject)}`);
 
         if ((!isNumber(decodedRequestObject.id)) || (!decodedRequestObject.questions)) {
-            logger.warn(`handleServerSocketMessage invalid decodedRequestObject ${decodedRequestObject}`);
+            logger.warn(`handleLocalMessage invalid decodedRequestObject ${decodedRequestObject}`);
             return;
         }
 
@@ -738,8 +738,8 @@ class DNSProxy {
         }
     }
 
-    private handleRemoteSocketMessage(decodedResponseObject: dnsPacket.DNSPacket) {
-        // logger.info(`remoteSocket message decodedResponseObject = ${stringifyPretty(decodedResponseObject)}`);
+    private handleRemoteMessage(decodedResponseObject: dnsPacket.DNSPacket) {
+        // logger.info(`handleRemoteMessage decodedResponseObject = ${stringifyPretty(decodedResponseObject)}`);
 
         if (!isNumber(decodedResponseObject.id) || (!decodedResponseObject.questions)) {
             logger.warn(`handleRemoteSocketMessage invalid decodedResponseObject ${decodedResponseObject}`);
@@ -805,7 +805,7 @@ class DNSProxy {
         this.udpServerSocket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
             const decodedMessage = decodeDNSPacket(message);
             if (decodedMessage) {
-                this.handleServerSocketMessage(decodedMessage, ClientRemoteInfo.createUDP(this.udpServerSocket, remoteInfo));
+                this.handleLocalMessage(decodedMessage, ClientRemoteInfo.createUDP(this.udpServerSocket, remoteInfo));
             }
         });
 
@@ -838,7 +838,7 @@ class DNSProxy {
             });
 
             connection.on('data', createTCPDataHandler((decodedMessage) => {
-                this.handleServerSocketMessage(decodedMessage, ClientRemoteInfo.createTCP(connection))
+                this.handleLocalMessage(decodedMessage, ClientRemoteInfo.createTCP(connection))
             }));
 
             connection.on('timeout', () => {
