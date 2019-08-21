@@ -225,7 +225,7 @@ class UDPLocalServer implements LocalServer {
         private readonly configuration: configuration.Configuration,
         private readonly callback: MessageAndClientRemoteInfoCallback) {
 
-        this.udpServerSocket = createUDPSocket();
+        this.udpServerSocket = createUDPSocket(configuration.udpSocketBufferSizes);
     }
 
     start() {

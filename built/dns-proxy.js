@@ -195,7 +195,7 @@ class UDPLocalServer {
     constructor(configuration, callback) {
         this.configuration = configuration;
         this.callback = callback;
-        this.udpServerSocket = createUDPSocket();
+        this.udpServerSocket = createUDPSocket(configuration.udpSocketBufferSizes);
     }
     start() {
         let udpServerSocketListening = false;
