@@ -211,6 +211,105 @@ const createUDPSocket = (socketBufferSizes?: configuration.SocketBufferSizes): d
     });
 };
 
+type MessageAndClientRemoteInfoCallback = (decodedMessage: dnsPacket.DNSPacket, clientRemoteInfo: ClientRemoteInfo) => void;
+
+interface LocalServer {
+    start(): void;
+}
+
+class UDPLocalServer implements LocalServer {
+
+    private readonly udpServerSocket: dgram.Socket;
+
+    constructor(
+        private readonly configuration: configuration.Configuration,
+        private readonly callback: MessageAndClientRemoteInfoCallback) {
+
+        this.udpServerSocket = createUDPSocket();
+    }
+
+    start() {
+
+        let udpServerSocketListening = false;
+        this.udpServerSocket.on('error', (err) => {
+            logger.warn(`udpServerSocket error ${formatError(err)}`);
+            if (!udpServerSocketListening) {
+                throw new Error('udp server socket bind error');
+            }
+        });
+
+        this.udpServerSocket.on('listening', () => {
+            udpServerSocketListening = true;
+            logger.info(`udpServerSocket listening on ${stringify(this.udpServerSocket.address())} rcvbuf=${this.udpServerSocket.getRecvBufferSize()} sndbuf=${this.udpServerSocket.getSendBufferSize()}`);
+        });
+
+        this.udpServerSocket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
+            const decodedMessage = decodeDNSPacket(message);
+            if (decodedMessage) {
+                this.callback(decodedMessage, ClientRemoteInfo.createUDP(this.udpServerSocket, remoteInfo));
+            }
+        });
+
+        this.udpServerSocket.bind(
+            this.configuration.listenAddressAndPort.port,
+            this.configuration.listenAddressAndPort.address);
+    }
+}
+
+class TCPLocalServer implements LocalServer {
+
+    private readonly tcpServerSocket: net.Server;
+
+    constructor(
+        private readonly configuration: configuration.Configuration,
+        private readonly callback: MessageAndClientRemoteInfoCallback) {
+
+        this.tcpServerSocket = net.createServer();
+    }
+
+    start() {
+
+        let tcpServerSocketListening = false;
+        this.tcpServerSocket.on('error', (err) => {
+            logger.warn(`tcpServerSocket error ${formatError(err)}`);
+            if (!tcpServerSocketListening) {
+                throw new Error('tcp server socket listen error');
+            }
+        });
+
+        this.tcpServerSocket.on('listening', () => {
+            tcpServerSocketListening = true;
+            logger.info(`tcpServerSocket listening on ${stringify(this.tcpServerSocket.address())}`);
+        });
+
+        this.tcpServerSocket.on('connection', (connection) => {
+
+            connection.on('error', (err) => {
+                logger.warn(`tcp client error ${formatError(err)}`);
+                connection.destroy();
+            });
+
+            connection.on('close', () => {
+
+            });
+
+            connection.on('data', createTCPDataHandler((decodedMessage) => {
+                this.callback(decodedMessage, ClientRemoteInfo.createTCP(connection))
+            }));
+
+            connection.on('timeout', () => {
+                connection.destroy();
+            });
+
+            connection.setTimeout(this.configuration.tcpConnectionTimeoutSeconds * 1000);
+        });
+
+        this.tcpServerSocket.listen(
+            this.configuration.listenAddressAndPort.port,
+            this.configuration.listenAddressAndPort.address);
+    }
+}
+
 interface RemoteServerConnection {
     writeRequest(dnsRequest: dnsPacket.DNSPacket): void;
 }
@@ -546,15 +645,21 @@ class DNSProxy {
 
     private readonly questionToResponseCache = new ExpiringCache<string, CacheObject>();
 
-    private readonly udpServerSocket: dgram.Socket;
-
-    private readonly tcpServerSocket: net.Server;
+    private readonly localServers: LocalServer[] = [];
 
     private readonly remoteRequestRouter: RemoteRequestRouter;
 
     constructor(private readonly configuration: configuration.Configuration) {
-        this.udpServerSocket = createUDPSocket(configuration.udpSocketBufferSizes);
-        this.tcpServerSocket = net.createServer();
+
+        this.localServers.push(
+            new UDPLocalServer(
+                configuration,
+                (decodeDNSPacket, clientRemoteInfo) => this.handleLocalMessage(decodeDNSPacket, clientRemoteInfo)));
+
+        this.localServers.push(
+            new TCPLocalServer(
+                configuration,
+                (decodeDNSPacket, clientRemoteInfo) => this.handleLocalMessage(decodeDNSPacket, clientRemoteInfo)));
 
         this.remoteRequestRouter = new RemoteRequestRouter(
             configuration,
@@ -789,78 +894,12 @@ class DNSProxy {
         clientRemoteInfo.writeResponse(decodedResponseObject);
     }
 
-    private setupSocketEvents() {
-
-        let udpServerSocketListening = false;
-        this.udpServerSocket.on('error', (err) => {
-            logger.warn(`udpServerSocket error ${formatError(err)}`);
-            if (!udpServerSocketListening) {
-                throw new Error('udp server socket bind error');
-            }
-        });
-
-        this.udpServerSocket.on('listening', () => {
-            udpServerSocketListening = true;
-            logger.info(`udpServerSocket listening on ${stringify(this.udpServerSocket.address())} rcvbuf=${this.udpServerSocket.getRecvBufferSize()} sndbuf=${this.udpServerSocket.getSendBufferSize()}`);
-        });
-
-        this.udpServerSocket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
-            const decodedMessage = decodeDNSPacket(message);
-            if (decodedMessage) {
-                this.handleLocalMessage(decodedMessage, ClientRemoteInfo.createUDP(this.udpServerSocket, remoteInfo));
-            }
-        });
-
-        this.udpServerSocket.bind(
-            this.configuration.listenAddressAndPort.port,
-            this.configuration.listenAddressAndPort.address);
-
-        let tcpServerSocketListening = false;
-        this.tcpServerSocket.on('error', (err) => {
-            logger.warn(`tcpServerSocket error ${formatError(err)}`);
-            if (!tcpServerSocketListening) {
-                throw new Error('tcp server socket listen error');
-            }
-        });
-
-        this.tcpServerSocket.on('listening', () => {
-            tcpServerSocketListening = true;
-            logger.info(`tcpServerSocket listening on ${stringify(this.tcpServerSocket.address())}`);
-        });
-
-        this.tcpServerSocket.on('connection', (connection) => {
-
-            connection.on('error', (err) => {
-                logger.warn(`tcp client error ${formatError(err)}`);
-                connection.destroy();
-            });
-
-            connection.on('close', () => {
-
-            });
-
-            connection.on('data', createTCPDataHandler((decodedMessage) => {
-                this.handleLocalMessage(decodedMessage, ClientRemoteInfo.createTCP(connection))
-            }));
-
-            connection.on('timeout', () => {
-                connection.destroy();
-            });
-
-            connection.setTimeout(this.configuration.tcpConnectionTimeoutSeconds * 1000);
-        });
-
-        this.tcpServerSocket.listen(
-            this.configuration.listenAddressAndPort.port,
-            this.configuration.listenAddressAndPort.address);
-    }
-
     start() {
         logger.info('begin start');
 
         this.buildFixedResponses();
 
-        this.setupSocketEvents();
+        this.localServers.forEach((localServer) => localServer.start());
 
         setInterval(() => this.timerPop(), this.configuration.timerIntervalSeconds * 1000);
     }
