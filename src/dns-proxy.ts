@@ -159,7 +159,9 @@ class CacheObject {
 
 }
 
-const createTCPDataHandler = (messageCallback: (decodedMessage: dnsPacket.DNSPacket) => void): ((data: Buffer) => void) => {
+type MessageCallback = (decodedMessage: dnsPacket.DNSPacket) => void;
+
+const createTCPDataHandler = (messageCallback: MessageCallback): ((data: Buffer) => void) => {
     let readingHeader = true;
     let buffer = Buffer.of();
     let bodyLength = 0;
@@ -221,7 +223,7 @@ class UDPRemoteServerConnection implements RemoteServerConnection {
 
     constructor(
         private readonly remoteAddressAndPort: configuration.AddressAndPort,
-        private readonly messageCallback: (decodedMessage: dnsPacket.DNSPacket) => void,
+        private readonly messageCallback: MessageCallback,
         socketBufferSizes?: configuration.SocketBufferSizes) {
 
         this.socket = createUDPSocket(socketBufferSizes);
@@ -272,7 +274,7 @@ class TCPRemoteServerConnection implements RemoteServerConnection {
     constructor(
         private readonly socketTimeoutMilliseconds: number,
         private readonly remoteAddressAndPort: configuration.AddressAndPort,
-        private readonly messageCallback: (decodedMessage: dnsPacket.DNSPacket) => void) {
+        private readonly messageCallback: MessageCallback) {
 
     }
 
@@ -337,7 +339,7 @@ class Http2RemoteServerConnection implements RemoteServerConnection {
         private readonly path: string,
         private readonly sessionTimeoutMilliseconds: number,
         private readonly requestTimeoutMilliseconds: number,
-        private readonly messageCallback: (decodedMessage: dnsPacket.DNSPacket) => void) {
+        private readonly messageCallback: MessageCallback) {
 
     }
 
@@ -450,7 +452,7 @@ class RemoteRequestRouter {
     constructor(
         configuration: configuration.Configuration,
         metrics: Metrics,
-        messageCallback: (decodedMessage: dnsPacket.DNSPacket) => void) {
+        messageCallback: MessageCallback) {
 
         if (configuration.remoteAddressesAndPorts) {
             this.routeRemoteRequest = this.buildTCPAndUDPRemoteRequestRouter(configuration, metrics, messageCallback);
@@ -468,7 +470,7 @@ class RemoteRequestRouter {
     private buildTCPAndUDPRemoteRequestRouter(
         configuration: configuration.Configuration,
         metrics: Metrics,
-        messageCallback: (decodedMessage: dnsPacket.DNSPacket) => void): RemoteRequestRouterFunction {
+        messageCallback: MessageCallback): RemoteRequestRouterFunction {
 
         const udpRemoteServerConnections: UDPRemoteServerConnection[] = [];
         const tcpRemoteServerConnections: TCPRemoteServerConnection[] = [];
@@ -515,7 +517,7 @@ class RemoteRequestRouter {
     private buildHttp2RemoteRequestRouter(
         remoteHttp2Configuration: configuration.RemoteHttp2Configuration,
         metrics: Metrics,
-        messageCallback: (decodedMessage: dnsPacket.DNSPacket) => void): RemoteRequestRouterFunction {
+        messageCallback: MessageCallback): RemoteRequestRouterFunction {
 
         const http2RemoteServerConnection = new Http2RemoteServerConnection(
             remoteHttp2Configuration.url,
