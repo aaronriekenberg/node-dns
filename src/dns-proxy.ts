@@ -516,6 +516,7 @@ class RemoteRequestRouter {
         remoteHttp2Configuration: configuration.RemoteHttp2Configuration,
         metrics: Metrics,
         messageCallback: (decodedMessage: dnsPacket.DNSPacket) => void): RemoteRequestRouterFunction {
+
         const http2RemoteServerConnection = new Http2RemoteServerConnection(
             remoteHttp2Configuration.url,
             remoteHttp2Configuration.path,
