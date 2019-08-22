@@ -159,6 +159,21 @@ class CacheObject {
 
 }
 
+class RequestProtocolMetrics {
+    http2: number = 0;
+    udp: number = 0;
+    tcp: number = 0;
+}
+
+class Metrics {
+    cacheHits: number = 0;
+    cacheMisses: number = 0;
+    fixedResponses: number = 0;
+    readonly localRequests = new RequestProtocolMetrics();
+    readonly remoteRequests = new RequestProtocolMetrics();
+    responseQuestionCacheKeyMismatch: number = 0;
+}
+
 type MessageCallback = (decodedMessage: dnsPacket.DNSPacket) => void;
 
 const createTCPDataHandler = (messageCallback: MessageCallback): ((data: Buffer) => void) => {
@@ -223,6 +238,7 @@ class UDPLocalServer implements LocalServer {
 
     constructor(
         private readonly configuration: configuration.Configuration,
+        private readonly metrics: Metrics,
         private readonly callback: MessageAndClientRemoteInfoCallback) {
 
         this.udpServerSocket = createUDPSocket(configuration.udpSocketBufferSizes);
@@ -246,6 +262,7 @@ class UDPLocalServer implements LocalServer {
         this.udpServerSocket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
             const decodedMessage = decodeDNSPacket(message);
             if (decodedMessage) {
+                ++this.metrics.localRequests.udp;
                 this.callback(decodedMessage, ClientRemoteInfo.createUDP(this.udpServerSocket, remoteInfo));
             }
         });
@@ -262,6 +279,7 @@ class TCPLocalServer implements LocalServer {
 
     constructor(
         private readonly configuration: configuration.Configuration,
+        private readonly metrics: Metrics,
         private readonly callback: MessageAndClientRemoteInfoCallback) {
 
         this.tcpServerSocket = net.createServer();
@@ -294,6 +312,7 @@ class TCPLocalServer implements LocalServer {
             });
 
             connection.on('data', createTCPDataHandler((decodedMessage) => {
+                ++this.metrics.localRequests.tcp;
                 this.callback(decodedMessage, ClientRemoteInfo.createTCP(connection))
             }));
 
@@ -527,21 +546,6 @@ class Http2RemoteServerConnection implements RemoteServerConnection {
     }
 }
 
-class RequestProtocolMetrics {
-    http2: number = 0;
-    udp: number = 0;
-    tcp: number = 0;
-}
-
-class Metrics {
-    cacheHits: number = 0;
-    cacheMisses: number = 0;
-    fixedResponses: number = 0;
-    readonly localRequests = new RequestProtocolMetrics();
-    readonly remoteRequests = new RequestProtocolMetrics();
-    responseQuestionCacheKeyMismatch: number = 0;
-}
-
 type RemoteRequestRouterFunction = (clientRemoteInfo: ClientRemoteInfo, request: dnsPacket.DNSPacket) => void;
 
 class RemoteRequestRouter {
@@ -654,11 +658,13 @@ class DNSProxy {
         this.localServers.push(
             new UDPLocalServer(
                 configuration,
+                this.metrics,
                 (decodeDNSPacket, clientRemoteInfo) => this.handleLocalMessage(decodeDNSPacket, clientRemoteInfo)));
 
         this.localServers.push(
             new TCPLocalServer(
                 configuration,
+                this.metrics,
                 (decodeDNSPacket, clientRemoteInfo) => this.handleLocalMessage(decodeDNSPacket, clientRemoteInfo)));
 
         this.remoteRequestRouter = new RemoteRequestRouter(
@@ -785,12 +791,6 @@ class DNSProxy {
         if ((!isNumber(decodedRequestObject.id)) || (!decodedRequestObject.questions)) {
             logger.warn(`handleLocalMessage invalid decodedRequestObject ${decodedRequestObject}`);
             return;
-        }
-
-        if (clientRemoteInfo.isUDP) {
-            ++this.metrics.localRequests.udp;
-        } else {
-            ++this.metrics.localRequests.tcp;
         }
 
         let responded = false;

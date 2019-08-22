@@ -144,6 +144,23 @@ class CacheObject {
         this.cacheTimeSeconds = cacheTimeSeconds;
     }
 }
+class RequestProtocolMetrics {
+    constructor() {
+        this.http2 = 0;
+        this.udp = 0;
+        this.tcp = 0;
+    }
+}
+class Metrics {
+    constructor() {
+        this.cacheHits = 0;
+        this.cacheMisses = 0;
+        this.fixedResponses = 0;
+        this.localRequests = new RequestProtocolMetrics();
+        this.remoteRequests = new RequestProtocolMetrics();
+        this.responseQuestionCacheKeyMismatch = 0;
+    }
+}
 const createTCPDataHandler = (messageCallback) => {
     let readingHeader = true;
     let buffer = Buffer.of();
@@ -192,8 +209,9 @@ const createUDPSocket = (socketBufferSizes) => {
     });
 };
 class UDPLocalServer {
-    constructor(configuration, callback) {
+    constructor(configuration, metrics, callback) {
         this.configuration = configuration;
+        this.metrics = metrics;
         this.callback = callback;
         this.udpServerSocket = createUDPSocket(configuration.udpSocketBufferSizes);
     }
@@ -212,6 +230,7 @@ class UDPLocalServer {
         this.udpServerSocket.on('message', (message, remoteInfo) => {
             const decodedMessage = decodeDNSPacket(message);
             if (decodedMessage) {
+                ++this.metrics.localRequests.udp;
                 this.callback(decodedMessage, ClientRemoteInfo.createUDP(this.udpServerSocket, remoteInfo));
             }
         });
@@ -219,8 +238,9 @@ class UDPLocalServer {
     }
 }
 class TCPLocalServer {
-    constructor(configuration, callback) {
+    constructor(configuration, metrics, callback) {
         this.configuration = configuration;
+        this.metrics = metrics;
         this.callback = callback;
         this.tcpServerSocket = net.createServer();
     }
@@ -244,6 +264,7 @@ class TCPLocalServer {
             connection.on('close', () => {
             });
             connection.on('data', createTCPDataHandler((decodedMessage) => {
+                ++this.metrics.localRequests.tcp;
                 this.callback(decodedMessage, ClientRemoteInfo.createTCP(connection));
             }));
             connection.on('timeout', () => {
@@ -410,23 +431,6 @@ class Http2RemoteServerConnection {
         this.clientHttp2Session = clientHttp2Session;
     }
 }
-class RequestProtocolMetrics {
-    constructor() {
-        this.http2 = 0;
-        this.udp = 0;
-        this.tcp = 0;
-    }
-}
-class Metrics {
-    constructor() {
-        this.cacheHits = 0;
-        this.cacheMisses = 0;
-        this.fixedResponses = 0;
-        this.localRequests = new RequestProtocolMetrics();
-        this.remoteRequests = new RequestProtocolMetrics();
-        this.responseQuestionCacheKeyMismatch = 0;
-    }
-}
 class RemoteRequestRouter {
     constructor(configuration, metrics, messageCallback) {
         if (configuration.remoteAddressesAndPorts) {
@@ -486,8 +490,8 @@ class DNSProxy {
         this.outgoingRequestCache = new expiring_cache_1.default();
         this.questionToResponseCache = new expiring_cache_1.default();
         this.localServers = [];
-        this.localServers.push(new UDPLocalServer(configuration, (decodeDNSPacket, clientRemoteInfo) => this.handleLocalMessage(decodeDNSPacket, clientRemoteInfo)));
-        this.localServers.push(new TCPLocalServer(configuration, (decodeDNSPacket, clientRemoteInfo) => this.handleLocalMessage(decodeDNSPacket, clientRemoteInfo)));
+        this.localServers.push(new UDPLocalServer(configuration, this.metrics, (decodeDNSPacket, clientRemoteInfo) => this.handleLocalMessage(decodeDNSPacket, clientRemoteInfo)));
+        this.localServers.push(new TCPLocalServer(configuration, this.metrics, (decodeDNSPacket, clientRemoteInfo) => this.handleLocalMessage(decodeDNSPacket, clientRemoteInfo)));
         this.remoteRequestRouter = new RemoteRequestRouter(configuration, this.metrics, (decodedMessage) => this.handleRemoteMessage(decodedMessage));
     }
     getQuestionCacheKey(questions) {
@@ -585,12 +589,6 @@ class DNSProxy {
         if ((!isNumber(decodedRequestObject.id)) || (!decodedRequestObject.questions)) {
             logger.warn(`handleLocalMessage invalid decodedRequestObject ${decodedRequestObject}`);
             return;
-        }
-        if (clientRemoteInfo.isUDP) {
-            ++this.metrics.localRequests.udp;
-        }
-        else {
-            ++this.metrics.localRequests.tcp;
         }
         let responded = false;
         const questionCacheKey = this.getQuestionCacheKey(decodedRequestObject.questions);
