@@ -506,7 +506,7 @@ class Http2RemoteServerConnection implements RemoteServerConnection {
                 logger.warn('http2 request timeout');
             });
 
-            request.on('end', () => {
+            request.once('end', () => {
                 if (responseChunks.length > 0) {
                     const responseBuffer = Buffer.concat(responseChunks);
                     const response = decodeDNSPacket(responseBuffer);
@@ -533,7 +533,7 @@ class Http2RemoteServerConnection implements RemoteServerConnection {
             logger.info('clientHttp2Session on connect');
         });
 
-        clientHttp2Session.on('close', () => {
+        clientHttp2Session.once('close', () => {
             logger.info(`clientHttp2Session on close`);
             this.clientHttp2Session = null;
         });
