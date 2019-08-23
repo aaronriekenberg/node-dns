@@ -276,9 +276,10 @@ class TCPLocalServer {
     }
 }
 class UDPRemoteServerConnection {
-    constructor(remoteAddressAndPort, messageCallback, socketBufferSizes) {
+    constructor(remoteAddressAndPort, messageCallback, metrics, socketBufferSizes) {
         this.remoteAddressAndPort = remoteAddressAndPort;
         this.messageCallback = messageCallback;
+        this.metrics = metrics;
         this.socketListening = false;
         this.socket = createUDPSocket(socketBufferSizes);
         this.setupSocketEvents();
@@ -304,15 +305,17 @@ class UDPRemoteServerConnection {
     }
     writeRequest(dnsRequest) {
         if (this.socketListening) {
+            ++this.metrics.remoteRequests.udp;
             writeDNSPacketToUDPSocket(this.socket, this.remoteAddressAndPort.port, this.remoteAddressAndPort.address, dnsRequest);
         }
     }
 }
 class TCPRemoteServerConnection {
-    constructor(socketTimeoutMilliseconds, remoteAddressAndPort, messageCallback) {
+    constructor(socketTimeoutMilliseconds, remoteAddressAndPort, messageCallback, metrics) {
         this.socketTimeoutMilliseconds = socketTimeoutMilliseconds;
         this.remoteAddressAndPort = remoteAddressAndPort;
         this.messageCallback = messageCallback;
+        this.metrics = metrics;
         this.socket = null;
         this.connecting = false;
         this.requestBuffer = [];
@@ -323,6 +326,7 @@ class TCPRemoteServerConnection {
             this.requestBuffer.push(dnsRequest);
         }
         else if (this.socket) {
+            ++this.metrics.remoteRequests.tcp;
             writeDNSPacketToTCPSocket(this.socket, dnsRequest);
         }
     }
@@ -347,6 +351,7 @@ class TCPRemoteServerConnection {
             socket.on('connect', () => {
                 this.connecting = false;
                 this.requestBuffer.forEach((bufferedRequest) => {
+                    ++this.metrics.remoteRequests.tcp;
                     writeDNSPacketToTCPSocket(socket, bufferedRequest);
                 });
                 this.requestBuffer = [];
@@ -358,12 +363,13 @@ class TCPRemoteServerConnection {
 }
 // https://tools.ietf.org/html/rfc8484
 class Http2RemoteServerConnection {
-    constructor(url, path, sessionTimeoutMilliseconds, requestTimeoutMilliseconds, messageCallback) {
+    constructor(url, path, sessionTimeoutMilliseconds, requestTimeoutMilliseconds, messageCallback, metrics) {
         this.url = url;
         this.path = path;
         this.sessionTimeoutMilliseconds = sessionTimeoutMilliseconds;
         this.requestTimeoutMilliseconds = requestTimeoutMilliseconds;
         this.messageCallback = messageCallback;
+        this.metrics = metrics;
         this.clientHttp2Session = null;
     }
     writeRequest(dnsRequest) {
@@ -376,6 +382,7 @@ class Http2RemoteServerConnection {
         this.createSessionIfNecessary();
         if (this.clientHttp2Session &&
             (!this.clientHttp2Session.destroyed)) {
+            ++this.metrics.remoteRequests.http2;
             const request = this.clientHttp2Session.request({
                 'content-type': 'application/dns-message',
                 'content-length': outgoingRequestBuffer.length,
@@ -447,8 +454,8 @@ class RemoteRequestRouter {
         const udpRemoteServerConnections = [];
         const tcpRemoteServerConnections = [];
         (configuration.remoteAddressesAndPorts || []).forEach((remoteAddressAndPort) => {
-            udpRemoteServerConnections.push(new UDPRemoteServerConnection(remoteAddressAndPort, messageCallback, configuration.udpSocketBufferSizes));
-            tcpRemoteServerConnections.push(new TCPRemoteServerConnection(configuration.tcpConnectionTimeoutSeconds * 1000, remoteAddressAndPort, messageCallback));
+            udpRemoteServerConnections.push(new UDPRemoteServerConnection(remoteAddressAndPort, messageCallback, metrics, configuration.udpSocketBufferSizes));
+            tcpRemoteServerConnections.push(new TCPRemoteServerConnection(configuration.tcpConnectionTimeoutSeconds * 1000, remoteAddressAndPort, messageCallback, metrics));
         });
         const buildRoundRobinGetter = (list) => {
             let nextIndex = 0;
@@ -465,19 +472,16 @@ class RemoteRequestRouter {
         const getNextTCPRemoteServerConnection = buildRoundRobinGetter(tcpRemoteServerConnections);
         return (clientRemoteInfo, request) => {
             if (clientRemoteInfo.isUDP) {
-                ++metrics.remoteRequests.udp;
                 getNextUDPRemoteServerConnection().writeRequest(request);
             }
             else {
-                ++metrics.remoteRequests.tcp;
                 getNextTCPRemoteServerConnection().writeRequest(request);
             }
         };
     }
     buildHttp2RemoteRequestRouter(remoteHttp2Configuration, metrics, messageCallback) {
-        const http2RemoteServerConnection = new Http2RemoteServerConnection(remoteHttp2Configuration.url, remoteHttp2Configuration.path, remoteHttp2Configuration.sessionTimeoutSeconds * 1000, remoteHttp2Configuration.requestTimeoutSeconds * 1000, messageCallback);
+        const http2RemoteServerConnection = new Http2RemoteServerConnection(remoteHttp2Configuration.url, remoteHttp2Configuration.path, remoteHttp2Configuration.sessionTimeoutSeconds * 1000, remoteHttp2Configuration.requestTimeoutSeconds * 1000, messageCallback, metrics);
         return (clientRemoteInfo, request) => {
-            ++metrics.remoteRequests.http2;
             http2RemoteServerConnection.writeRequest(request);
         };
     }

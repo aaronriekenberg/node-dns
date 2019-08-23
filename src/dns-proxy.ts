@@ -342,6 +342,7 @@ class UDPRemoteServerConnection implements RemoteServerConnection {
     constructor(
         private readonly remoteAddressAndPort: configuration.AddressAndPort,
         private readonly messageCallback: MessageCallback,
+        private readonly metrics: Metrics,
         socketBufferSizes?: configuration.SocketBufferSizes) {
 
         this.socket = createUDPSocket(socketBufferSizes);
@@ -375,6 +376,7 @@ class UDPRemoteServerConnection implements RemoteServerConnection {
 
     writeRequest(dnsRequest: dnsPacket.DNSPacket): void {
         if (this.socketListening) {
+            ++this.metrics.remoteRequests.udp;
             writeDNSPacketToUDPSocket(this.socket, this.remoteAddressAndPort.port, this.remoteAddressAndPort.address, dnsRequest);
         }
     }
@@ -392,7 +394,8 @@ class TCPRemoteServerConnection implements RemoteServerConnection {
     constructor(
         private readonly socketTimeoutMilliseconds: number,
         private readonly remoteAddressAndPort: configuration.AddressAndPort,
-        private readonly messageCallback: MessageCallback) {
+        private readonly messageCallback: MessageCallback,
+        private readonly metrics: Metrics) {
 
     }
 
@@ -404,6 +407,7 @@ class TCPRemoteServerConnection implements RemoteServerConnection {
         }
 
         else if (this.socket) {
+            ++this.metrics.remoteRequests.tcp;
             writeDNSPacketToTCPSocket(this.socket, dnsRequest);
         }
     }
@@ -435,6 +439,7 @@ class TCPRemoteServerConnection implements RemoteServerConnection {
             socket.on('connect', () => {
                 this.connecting = false;
                 this.requestBuffer.forEach((bufferedRequest) => {
+                    ++this.metrics.remoteRequests.tcp;
                     writeDNSPacketToTCPSocket(socket, bufferedRequest);
                 });
                 this.requestBuffer = [];
@@ -457,7 +462,8 @@ class Http2RemoteServerConnection implements RemoteServerConnection {
         private readonly path: string,
         private readonly sessionTimeoutMilliseconds: number,
         private readonly requestTimeoutMilliseconds: number,
-        private readonly messageCallback: MessageCallback) {
+        private readonly messageCallback: MessageCallback,
+        private readonly metrics: Metrics) {
 
     }
 
@@ -475,6 +481,8 @@ class Http2RemoteServerConnection implements RemoteServerConnection {
 
         if (this.clientHttp2Session &&
             (!this.clientHttp2Session.destroyed)) {
+
+            ++this.metrics.remoteRequests.http2;
 
             const request = this.clientHttp2Session.request({
                 'content-type': 'application/dns-message',
@@ -579,16 +587,20 @@ class RemoteRequestRouter {
         const tcpRemoteServerConnections: TCPRemoteServerConnection[] = [];
 
         (configuration.remoteAddressesAndPorts || []).forEach((remoteAddressAndPort) => {
+
             udpRemoteServerConnections.push(
                 new UDPRemoteServerConnection(
                     remoteAddressAndPort,
                     messageCallback,
+                    metrics,
                     configuration.udpSocketBufferSizes));
+
             tcpRemoteServerConnections.push(
                 new TCPRemoteServerConnection(
                     configuration.tcpConnectionTimeoutSeconds * 1000,
                     remoteAddressAndPort,
-                    messageCallback));
+                    messageCallback,
+                    metrics));
         });
 
         const buildRoundRobinGetter = <T>(list: T[]): (() => T) => {
@@ -608,10 +620,8 @@ class RemoteRequestRouter {
 
         return (clientRemoteInfo: ClientRemoteInfo, request: dnsPacket.DNSPacket) => {
             if (clientRemoteInfo.isUDP) {
-                ++metrics.remoteRequests.udp;
                 getNextUDPRemoteServerConnection().writeRequest(request);
             } else {
-                ++metrics.remoteRequests.tcp;
                 getNextTCPRemoteServerConnection().writeRequest(request);
             }
         };
@@ -627,10 +637,10 @@ class RemoteRequestRouter {
             remoteHttp2Configuration.path,
             remoteHttp2Configuration.sessionTimeoutSeconds * 1000,
             remoteHttp2Configuration.requestTimeoutSeconds * 1000,
-            messageCallback);
+            messageCallback,
+            metrics);
 
         return (clientRemoteInfo: ClientRemoteInfo, request: dnsPacket.DNSPacket) => {
-            ++metrics.remoteRequests.http2;
             http2RemoteServerConnection.writeRequest(request);
         };
     }
