@@ -10,4 +10,6 @@ if [ ! -d logs ]; then
   mkdir logs
 fi
 
+export PATH=${HOME}/bin:$PATH
+
 nohup ./built/dns-proxy.js $CONFIG_FILE 2>&1 | simplerotate logs &
