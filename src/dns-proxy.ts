@@ -480,6 +480,7 @@ class Http2RemoteServerConnection implements RemoteServerConnection {
         this.createSessionIfNecessary();
 
         if (this.clientHttp2Session &&
+            (!this.clientHttp2Session.closed) &&
             (!this.clientHttp2Session.destroyed)) {
 
             ++this.metrics.remoteRequests.http2;
