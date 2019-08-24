@@ -10,4 +10,4 @@ if [ ! -d logs ]; then
   mkdir logs
 fi
 
-nohup ./built/dns-proxy.js $CONFIG_FILE >> logs/output 2>&1 &
+nohup ./built/dns-proxy.js $CONFIG_FILE 2>&1 | simplerotate logs &
