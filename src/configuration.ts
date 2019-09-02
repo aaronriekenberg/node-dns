@@ -20,8 +20,7 @@ export interface RemoteHttp2Configuration {
 export interface Configuration {
     readonly udpSocketBufferSizes?: SocketBufferSizes;
     readonly listenAddressAndPort: AddressAndPort;
-    readonly remoteAddressesAndPorts?: AddressAndPort[];
-    readonly remoteHttp2Configuration?: RemoteHttp2Configuration;
+    readonly remoteHttp2Configuration: RemoteHttp2Configuration;
     readonly minTTLSeconds: number;
     readonly maxTTLSeconds: number;
     readonly requestTimeoutSeconds: number;

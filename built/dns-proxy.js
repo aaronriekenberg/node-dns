@@ -131,9 +131,8 @@ class ClientRemoteInfo {
     }
 }
 class OutgoingRequestInfo {
-    constructor(clientRemoteInfo, clientRequestID, questionCacheKey) {
+    constructor(clientRemoteInfo, questionCacheKey) {
         this.clientRemoteInfo = clientRemoteInfo;
-        this.clientRequestID = clientRequestID;
         this.questionCacheKey = questionCacheKey;
     }
 }
@@ -158,6 +157,7 @@ class Metrics {
         this.fixedResponses = 0;
         this.localRequests = new RequestProtocolMetrics();
         this.remoteRequests = new RequestProtocolMetrics();
+        this.requestErrors = 0;
         this.responseQuestionCacheKeyMismatch = 0;
     }
 }
@@ -275,114 +275,30 @@ class TCPLocalServer {
         this.tcpServerSocket.listen(this.configuration.listenAddressAndPort.port, this.configuration.listenAddressAndPort.address);
     }
 }
-class UDPRemoteServerConnection {
-    constructor(remoteAddressAndPort, messageCallback, metrics, socketBufferSizes) {
-        this.remoteAddressAndPort = remoteAddressAndPort;
-        this.messageCallback = messageCallback;
-        this.metrics = metrics;
-        this.socketListening = false;
-        this.socket = createUDPSocket(socketBufferSizes);
-        this.setupSocketEvents();
-    }
-    setupSocketEvents() {
-        this.socket.on('error', (err) => {
-            logger.warn(`udp remote socket error remoteAddressAndPort=${stringify(this.remoteAddressAndPort)} ${formatError(err)}`);
-            if (!this.socketListening) {
-                throw new Error(`udp remote socket error remoteAddressAndPort=${stringify(this.remoteAddressAndPort)}`);
-            }
-        });
-        this.socket.on('listening', () => {
-            this.socketListening = true;
-            logger.info(`udpRemoteSocket listening on ${stringify(this.socket.address())} remoteAddressAndPort=${stringify(this.remoteAddressAndPort)} rcvbuf=${this.socket.getRecvBufferSize()} sndbuf=${this.socket.getSendBufferSize()}`);
-        });
-        this.socket.on('message', (message, remoteInfo) => {
-            const decodedMessage = decodeDNSPacket(message);
-            if (decodedMessage) {
-                this.messageCallback(decodedMessage);
-            }
-        });
-        this.socket.bind();
-    }
-    writeRequest(dnsRequest) {
-        if (this.socketListening) {
-            ++this.metrics.remoteRequests.udp;
-            writeDNSPacketToUDPSocket(this.socket, this.remoteAddressAndPort.port, this.remoteAddressAndPort.address, dnsRequest);
-        }
-    }
-}
-class TCPRemoteServerConnection {
-    constructor(socketTimeoutMilliseconds, remoteAddressAndPort, messageCallback, metrics) {
-        this.socketTimeoutMilliseconds = socketTimeoutMilliseconds;
-        this.remoteAddressAndPort = remoteAddressAndPort;
-        this.messageCallback = messageCallback;
-        this.metrics = metrics;
-        this.socket = null;
-        this.connecting = false;
-        this.requestBuffer = [];
-    }
-    writeRequest(dnsRequest) {
-        this.createSocketIfNecessary();
-        if (this.connecting) {
-            this.requestBuffer.push(dnsRequest);
-        }
-        else if (this.socket) {
-            ++this.metrics.remoteRequests.tcp;
-            writeDNSPacketToTCPSocket(this.socket, dnsRequest);
-        }
-    }
-    createSocketIfNecessary() {
-        if (!this.socket) {
-            const socket = new net.Socket();
-            this.socket = socket;
-            socket.on('error', (err) => {
-                logger.warn(`remote tcp client error remoteAddressAndPort=${stringify(this.remoteAddressAndPort)} ${formatError(err)}`);
-                socket.destroy();
-            });
-            socket.on('close', () => {
-                this.socket = null;
-                this.connecting = false;
-                this.requestBuffer = [];
-            });
-            socket.on('data', createTCPDataHandler((decodedMessage) => this.messageCallback(decodedMessage)));
-            socket.on('timeout', () => {
-                socket.destroy();
-            });
-            socket.setTimeout(this.socketTimeoutMilliseconds);
-            socket.on('connect', () => {
-                this.connecting = false;
-                this.requestBuffer.forEach((bufferedRequest) => {
-                    ++this.metrics.remoteRequests.tcp;
-                    writeDNSPacketToTCPSocket(socket, bufferedRequest);
-                });
-                this.requestBuffer = [];
-            });
-            socket.connect(this.remoteAddressAndPort.port, this.remoteAddressAndPort.address);
-            this.connecting = true;
-        }
-    }
-}
 // https://tools.ietf.org/html/rfc8484
 class Http2RemoteServerConnection {
-    constructor(url, path, sessionTimeoutMilliseconds, requestTimeoutMilliseconds, messageCallback, metrics) {
+    constructor(url, path, sessionTimeoutMilliseconds, requestTimeoutMilliseconds, metrics) {
         this.url = url;
         this.path = path;
         this.sessionTimeoutMilliseconds = sessionTimeoutMilliseconds;
         this.requestTimeoutMilliseconds = requestTimeoutMilliseconds;
-        this.messageCallback = messageCallback;
         this.metrics = metrics;
         this.clientHttp2Session = null;
     }
     writeRequest(dnsRequest) {
-        const originalID = dnsRequest.id;
-        dnsRequest.id = 0;
-        const outgoingRequestBuffer = encodeDNSPacket(dnsRequest);
-        if (!outgoingRequestBuffer) {
-            return;
-        }
-        this.createSessionIfNecessary();
-        if (this.clientHttp2Session &&
-            (!this.clientHttp2Session.closed) &&
-            (!this.clientHttp2Session.destroyed)) {
+        return new Promise((resolve, reject) => {
+            const originalID = dnsRequest.id;
+            dnsRequest.id = 0;
+            const outgoingRequestBuffer = encodeDNSPacket(dnsRequest);
+            if (!outgoingRequestBuffer) {
+                reject(new Error('error encoding dns packet'));
+                return;
+            }
+            this.createSessionIfNecessary();
+            if ((!this.clientHttp2Session) || this.clientHttp2Session.closed || this.clientHttp2Session.destroyed) {
+                reject(new Error('clientHttp2Session invalid state'));
+                return;
+            }
             ++this.metrics.remoteRequests.http2;
             const request = this.clientHttp2Session.request({
                 'content-type': 'application/dns-message',
@@ -396,24 +312,30 @@ class Http2RemoteServerConnection {
                 responseChunks.push(chunk);
             });
             request.on('error', (error) => {
-                logger.warn(`request error error = ${formatError(error)}`);
+                reject(new Error(`http2 request error error = ${formatError(error)}`));
             });
             request.setTimeout(this.requestTimeoutMilliseconds);
             request.on('timeout', () => {
-                logger.warn('http2 request timeout');
+                reject(new Error(`http2 request timeout`));
             });
             request.once('end', () => {
-                if (responseChunks.length > 0) {
+                if (responseChunks.length == 0) {
+                    reject(new Error('responseChunks empty'));
+                }
+                else {
                     const responseBuffer = Buffer.concat(responseChunks);
                     const response = decodeDNSPacket(responseBuffer);
-                    if (response) {
+                    if (!response) {
+                        reject(new Error('error decoding dns packet'));
+                    }
+                    else {
                         response.id = originalID;
-                        this.messageCallback(response);
+                        resolve(response);
                     }
                 }
             });
             request.end(outgoingRequestBuffer);
-        }
+        });
     }
     createSessionIfNecessary() {
         if (this.clientHttp2Session) {
@@ -439,65 +361,16 @@ class Http2RemoteServerConnection {
         this.clientHttp2Session = clientHttp2Session;
     }
 }
-class RemoteRequestRouter {
-    constructor(configuration, metrics, messageCallback) {
-        if (configuration.remoteAddressesAndPorts) {
-            this.routeRemoteRequest = this.buildTCPAndUDPRemoteRequestRouter(configuration, metrics, messageCallback);
-        }
-        else if (configuration.remoteHttp2Configuration) {
-            this.routeRemoteRequest = this.buildHttp2RemoteRequestRouter(configuration.remoteHttp2Configuration, metrics, messageCallback);
-        }
-        else {
-            throw new Error('must have one of remoteAddressesAndPorts or remoteHttp2Configuration defined in configurartion');
-        }
-    }
-    buildTCPAndUDPRemoteRequestRouter(configuration, metrics, messageCallback) {
-        const udpRemoteServerConnections = [];
-        const tcpRemoteServerConnections = [];
-        (configuration.remoteAddressesAndPorts || []).forEach((remoteAddressAndPort) => {
-            udpRemoteServerConnections.push(new UDPRemoteServerConnection(remoteAddressAndPort, messageCallback, metrics, configuration.udpSocketBufferSizes));
-            tcpRemoteServerConnections.push(new TCPRemoteServerConnection(configuration.tcpConnectionTimeoutSeconds * 1000, remoteAddressAndPort, messageCallback, metrics));
-        });
-        const buildRoundRobinGetter = (list) => {
-            let nextIndex = 0;
-            return () => {
-                if (nextIndex >= list.length) {
-                    nextIndex = 0;
-                }
-                const retVal = list[nextIndex];
-                ++nextIndex;
-                return retVal;
-            };
-        };
-        const getNextUDPRemoteServerConnection = buildRoundRobinGetter(udpRemoteServerConnections);
-        const getNextTCPRemoteServerConnection = buildRoundRobinGetter(tcpRemoteServerConnections);
-        return (clientRemoteInfo, request) => {
-            if (clientRemoteInfo.isUDP) {
-                getNextUDPRemoteServerConnection().writeRequest(request);
-            }
-            else {
-                getNextTCPRemoteServerConnection().writeRequest(request);
-            }
-        };
-    }
-    buildHttp2RemoteRequestRouter(remoteHttp2Configuration, metrics, messageCallback) {
-        const http2RemoteServerConnection = new Http2RemoteServerConnection(remoteHttp2Configuration.url, remoteHttp2Configuration.path, remoteHttp2Configuration.sessionTimeoutSeconds * 1000, remoteHttp2Configuration.requestTimeoutSeconds * 1000, messageCallback, metrics);
-        return (clientRemoteInfo, request) => {
-            http2RemoteServerConnection.writeRequest(request);
-        };
-    }
-}
 class DNSProxy {
     constructor(configuration) {
         this.configuration = configuration;
         this.metrics = new Metrics();
         this.questionToFixedResponse = new Map();
-        this.outgoingRequestCache = new expiring_cache_1.default();
         this.questionToResponseCache = new expiring_cache_1.default();
         this.localServers = [];
         this.localServers.push(new UDPLocalServer(configuration, this.metrics, (decodeDNSPacket, clientRemoteInfo) => this.handleLocalMessage(decodeDNSPacket, clientRemoteInfo)));
         this.localServers.push(new TCPLocalServer(configuration, this.metrics, (decodeDNSPacket, clientRemoteInfo) => this.handleLocalMessage(decodeDNSPacket, clientRemoteInfo)));
-        this.remoteRequestRouter = new RemoteRequestRouter(configuration, this.metrics, (decodedMessage) => this.handleRemoteMessage(decodedMessage));
+        this.http2RemoteServerConnection = new Http2RemoteServerConnection(configuration.remoteHttp2Configuration.url, configuration.remoteHttp2Configuration.path, configuration.remoteHttp2Configuration.sessionTimeoutSeconds * 1000, configuration.remoteHttp2Configuration.requestTimeoutSeconds * 1000, this.metrics);
     }
     getQuestionCacheKey(questions) {
         let key = '';
@@ -576,20 +449,16 @@ class DNSProxy {
     timerPop() {
         logger.info('begin timer pop');
         const nowSeconds = getNowSeconds();
-        const expiredOutgoingIDs = this.outgoingRequestCache.periodicCleanUp(nowSeconds);
         const expiredQuestionCacheKeys = this.questionToResponseCache.periodicCleanUp(nowSeconds);
         const logData = {
             metrics: this.metrics,
-            expiredOutgoingIDs,
-            outgoingRequestMapSize: this.outgoingRequestCache.mapSize,
-            outgoingRequestQueueSize: this.outgoingRequestCache.queueSize,
             expiredQuestionCacheKeys,
             questionToResponseMapSize: this.questionToResponseCache.mapSize,
             questionToResponseQueueSize: this.questionToResponseCache.queueSize
         };
         logger.info(`end timer pop ${stringify(logData)}`);
     }
-    handleLocalMessage(decodedRequestObject, clientRemoteInfo) {
+    async handleLocalMessage(decodedRequestObject, clientRemoteInfo) {
         // logger.info(`handleLocalMessage message remoteInfo = ${stringifyPretty(clientRemoteInfo)}\ndecodedRequestObject = ${stringifyPretty(decodedRequestObject)}`);
         if ((!isNumber(decodedRequestObject.id)) || (!decodedRequestObject.questions)) {
             logger.warn(`handleLocalMessage invalid decodedRequestObject ${decodedRequestObject}`);
@@ -618,30 +487,28 @@ class DNSProxy {
         }
         if (!responded) {
             ++this.metrics.cacheMisses;
-            const outgoingRequestID = this.getRandomDNSID();
-            const expirationTimeSeconds = getNowSeconds() + this.configuration.requestTimeoutSeconds;
-            const outgoingRequestInfo = new OutgoingRequestInfo(clientRemoteInfo, decodedRequestObject.id, questionCacheKey);
-            this.outgoingRequestCache.add(outgoingRequestID, outgoingRequestInfo, expirationTimeSeconds);
-            decodedRequestObject.id = outgoingRequestID;
-            this.remoteRequestRouter.routeRemoteRequest(clientRemoteInfo, decodedRequestObject);
+            const outgoingRequestInfo = new OutgoingRequestInfo(clientRemoteInfo, questionCacheKey);
+            try {
+                const response = await this.http2RemoteServerConnection.writeRequest(decodedRequestObject);
+                this.handleRemoteMessage(outgoingRequestInfo, response);
+            }
+            catch (err) {
+                ++this.metrics.requestErrors;
+                logger.error(`http2RemoteServerConnection.writeRequest error err = ${formatError(err)}`);
+            }
         }
     }
-    handleRemoteMessage(decodedResponseObject) {
+    handleRemoteMessage(outgoingRequestInfo, decodedResponseObject) {
         // logger.info(`handleRemoteMessage decodedResponseObject = ${stringifyPretty(decodedResponseObject)}`);
         if (!isNumber(decodedResponseObject.id) || (!decodedResponseObject.questions)) {
             logger.warn(`handleRemoteSocketMessage invalid decodedResponseObject ${decodedResponseObject}`);
             return;
         }
-        const clientRequestInfo = this.outgoingRequestCache.get(decodedResponseObject.id);
-        if (!clientRequestInfo) {
-            return;
-        }
         const responseQuestionCacheKey = this.getQuestionCacheKey(decodedResponseObject.questions);
-        if (responseQuestionCacheKey !== clientRequestInfo.questionCacheKey) {
+        if (responseQuestionCacheKey !== outgoingRequestInfo.questionCacheKey) {
             ++this.metrics.responseQuestionCacheKeyMismatch;
             return;
         }
-        this.outgoingRequestCache.delete(decodedResponseObject.id);
         if ((decodedResponseObject.rcode === 'NOERROR') ||
             (decodedResponseObject.rcode === 'NXDOMAIN')) {
             const minTTLSeconds = this.getMinTTLSecondsForResponse(decodedResponseObject);
@@ -649,11 +516,10 @@ class DNSProxy {
                 const nowSeconds = getNowSeconds();
                 const expirationTimeSeconds = nowSeconds + minTTLSeconds;
                 const cacheObject = new CacheObject(expirationTimeSeconds, decodedResponseObject, nowSeconds);
-                this.questionToResponseCache.add(clientRequestInfo.questionCacheKey, cacheObject, expirationTimeSeconds);
+                this.questionToResponseCache.add(outgoingRequestInfo.questionCacheKey, cacheObject, expirationTimeSeconds);
             }
         }
-        decodedResponseObject.id = clientRequestInfo.clientRequestID;
-        const clientRemoteInfo = clientRequestInfo.clientRemoteInfo;
+        const clientRemoteInfo = outgoingRequestInfo.clientRemoteInfo;
         clientRemoteInfo.writeResponse(decodedResponseObject);
     }
     start() {
