@@ -384,12 +384,6 @@ class DNSProxy {
         });
         return key;
     }
-    getRandomDNSID() {
-        const getRandomIntInclusive = (min, max) => {
-            return Math.floor(Math.random() * (max - min + 1)) + min;
-        };
-        return getRandomIntInclusive(1, 65534);
-    }
     buildFixedResponses() {
         (this.configuration.fixedResponses || []).forEach((fixedResponse) => {
             const questionCacheKey = this.getQuestionCacheKey(fixedResponse.questions);
@@ -488,13 +482,16 @@ class DNSProxy {
         if (!responded) {
             ++this.metrics.cacheMisses;
             const outgoingRequestInfo = new OutgoingRequestInfo(clientRemoteInfo, questionCacheKey);
+            let response;
             try {
-                const response = await this.http2RemoteServerConnection.writeRequest(decodedRequestObject);
-                this.handleRemoteMessage(outgoingRequestInfo, response);
+                response = await this.http2RemoteServerConnection.writeRequest(decodedRequestObject);
             }
             catch (err) {
                 ++this.metrics.requestErrors;
                 logger.error(`http2RemoteServerConnection.writeRequest error err = ${formatError(err)}`);
+            }
+            if (response) {
+                this.handleRemoteMessage(outgoingRequestInfo, response);
             }
         }
     }
