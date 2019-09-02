@@ -169,7 +169,6 @@ class Metrics {
     readonly localRequests = new RequestProtocolMetrics();
     readonly remoteRequests = new RequestProtocolMetrics();
     remoteRequestErrors: number = 0;
-    responseQuestionCacheKeyMismatch: number = 0;
 }
 
 type MessageCallback = (decodedMessage: dnsPacket.DNSPacket) => void;
@@ -573,7 +572,7 @@ class DNSProxy {
         logger.info(`end timer pop ${stringify(logData)}`);
     }
 
-    private async handleLocalMessage(decodedRequestObject: dnsPacket.DNSPacket, clientRemoteInfo: ClientRemoteInfo) {
+    private handleLocalMessage(decodedRequestObject: dnsPacket.DNSPacket, clientRemoteInfo: ClientRemoteInfo) {
         // logger.info(`handleLocalMessage message remoteInfo = ${stringifyPretty(clientRemoteInfo)}\ndecodedRequestObject = ${stringifyPretty(decodedRequestObject)}`);
 
         if ((!isNumber(decodedRequestObject.id)) || (!decodedRequestObject.questions)) {
@@ -611,28 +610,28 @@ class DNSProxy {
         }
 
         if (!responded) {
-            const outgoingRequestInfo =
-                new OutgoingRequestInfo(
-                    clientRemoteInfo,
-                    questionCacheKey);
-
-            let response: dnsPacket.DNSPacket | undefined;
-
-            try {
-                response = await this.http2RemoteServerConnection.writeRequest(decodedRequestObject);
-            } catch (err) {
-                ++this.metrics.remoteRequestErrors;
-                logger.error(`http2RemoteServerConnection.writeRequest error err = ${formatError(err)}`);
-            }
-
-            if (response) {
-                this.handleRemoteMessage(outgoingRequestInfo, response);
-            }
+            this.sendRemoteRequest(clientRemoteInfo, decodedRequestObject);
         }
     }
 
-    private handleRemoteMessage(outgoingRequestInfo: OutgoingRequestInfo, decodedResponseObject: dnsPacket.DNSPacket) {
-        // logger.info(`handleRemoteMessage decodedResponseObject = ${stringifyPretty(decodedResponseObject)}`);
+    private async sendRemoteRequest(clientRemoteInfo: ClientRemoteInfo, request: dnsPacket.DNSPacket) {
+
+        let response: dnsPacket.DNSPacket | undefined;
+
+        try {
+            response = await this.http2RemoteServerConnection.writeRequest(request);
+        } catch (err) {
+            ++this.metrics.remoteRequestErrors;
+            logger.error(`http2RemoteServerConnection.writeRequest error err = ${formatError(err)}`);
+        }
+
+        if (response) {
+            this.handleRemoteResponse(clientRemoteInfo, response);
+        }
+    }
+
+    private handleRemoteResponse(clientRemoteInfo: ClientRemoteInfo, decodedResponseObject: dnsPacket.DNSPacket) {
+        // logger.info(`handleRemoteResponse decodedResponseObject = ${stringifyPretty(decodedResponseObject)}`);
 
         if (!isNumber(decodedResponseObject.id) || (!decodedResponseObject.questions)) {
             logger.warn(`handleRemoteSocketMessage invalid decodedResponseObject ${decodedResponseObject}`);
@@ -640,11 +639,6 @@ class DNSProxy {
         }
 
         const responseQuestionCacheKey = this.getQuestionCacheKey(decodedResponseObject.questions);
-
-        if (responseQuestionCacheKey !== outgoingRequestInfo.questionCacheKey) {
-            ++this.metrics.responseQuestionCacheKeyMismatch;
-            return;
-        }
 
         if ((decodedResponseObject.rcode === 'NOERROR') ||
             (decodedResponseObject.rcode === 'NXDOMAIN')) {
@@ -662,11 +656,9 @@ class DNSProxy {
                     decodedResponseObject,
                     nowSeconds);
 
-                this.questionToResponseCache.add(outgoingRequestInfo.questionCacheKey, cacheObject, expirationTimeSeconds);
+                this.questionToResponseCache.add(responseQuestionCacheKey, cacheObject, expirationTimeSeconds);
             }
         }
-
-        const clientRemoteInfo = outgoingRequestInfo.clientRemoteInfo;
 
         clientRemoteInfo.writeResponse(decodedResponseObject);
     }
