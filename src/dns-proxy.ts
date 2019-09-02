@@ -457,13 +457,13 @@ class DNSProxy {
             new UDPLocalServer(
                 configuration,
                 this.metrics,
-                (decodeDNSPacket, clientRemoteInfo) => this.handleLocalMessage(decodeDNSPacket, clientRemoteInfo)));
+                (decodeDNSPacket, clientRemoteInfo) => this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo)));
 
         this.localServers.push(
             new TCPLocalServer(
                 configuration,
                 this.metrics,
-                (decodeDNSPacket, clientRemoteInfo) => this.handleLocalMessage(decodeDNSPacket, clientRemoteInfo)));
+                (decodeDNSPacket, clientRemoteInfo) => this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo)));
 
         this.http2RemoteServerConnection = new Http2RemoteServerConnection(
             configuration.remoteHttp2Configuration.url,
@@ -572,11 +572,11 @@ class DNSProxy {
         logger.info(`end timer pop ${stringify(logData)}`);
     }
 
-    private handleLocalMessage(decodedRequestObject: dnsPacket.DNSPacket, clientRemoteInfo: ClientRemoteInfo) {
-        // logger.info(`handleLocalMessage message remoteInfo = ${stringifyPretty(clientRemoteInfo)}\ndecodedRequestObject = ${stringifyPretty(decodedRequestObject)}`);
+    private handleLocalRequest(decodedRequestObject: dnsPacket.DNSPacket, clientRemoteInfo: ClientRemoteInfo) {
+        // logger.info(`handleLocalRequest message remoteInfo = ${stringifyPretty(clientRemoteInfo)}\ndecodedRequestObject = ${stringifyPretty(decodedRequestObject)}`);
 
         if ((!isNumber(decodedRequestObject.id)) || (!decodedRequestObject.questions)) {
-            logger.warn(`handleLocalMessage invalid decodedRequestObject ${decodedRequestObject}`);
+            logger.warn(`handleLocalRequest invalid decodedRequestObject ${decodedRequestObject}`);
             return;
         }
 

@@ -365,8 +365,8 @@ class DNSProxy {
         this.questionToFixedResponse = new Map();
         this.questionToResponseCache = new expiring_cache_1.default();
         this.localServers = [];
-        this.localServers.push(new UDPLocalServer(configuration, this.metrics, (decodeDNSPacket, clientRemoteInfo) => this.handleLocalMessage(decodeDNSPacket, clientRemoteInfo)));
-        this.localServers.push(new TCPLocalServer(configuration, this.metrics, (decodeDNSPacket, clientRemoteInfo) => this.handleLocalMessage(decodeDNSPacket, clientRemoteInfo)));
+        this.localServers.push(new UDPLocalServer(configuration, this.metrics, (decodeDNSPacket, clientRemoteInfo) => this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo)));
+        this.localServers.push(new TCPLocalServer(configuration, this.metrics, (decodeDNSPacket, clientRemoteInfo) => this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo)));
         this.http2RemoteServerConnection = new Http2RemoteServerConnection(configuration.remoteHttp2Configuration.url, configuration.remoteHttp2Configuration.path, configuration.remoteHttp2Configuration.sessionTimeoutSeconds * 1000, configuration.remoteHttp2Configuration.requestTimeoutSeconds * 1000, this.metrics);
     }
     getQuestionCacheKey(questions) {
@@ -448,10 +448,10 @@ class DNSProxy {
         };
         logger.info(`end timer pop ${stringify(logData)}`);
     }
-    handleLocalMessage(decodedRequestObject, clientRemoteInfo) {
-        // logger.info(`handleLocalMessage message remoteInfo = ${stringifyPretty(clientRemoteInfo)}\ndecodedRequestObject = ${stringifyPretty(decodedRequestObject)}`);
+    handleLocalRequest(decodedRequestObject, clientRemoteInfo) {
+        // logger.info(`handleLocalRequest message remoteInfo = ${stringifyPretty(clientRemoteInfo)}\ndecodedRequestObject = ${stringifyPretty(decodedRequestObject)}`);
         if ((!isNumber(decodedRequestObject.id)) || (!decodedRequestObject.questions)) {
-            logger.warn(`handleLocalMessage invalid decodedRequestObject ${decodedRequestObject}`);
+            logger.warn(`handleLocalRequest invalid decodedRequestObject ${decodedRequestObject}`);
             return;
         }
         let responded = false;
