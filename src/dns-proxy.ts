@@ -165,12 +165,10 @@ class RequestProtocolMetrics {
 }
 
 class Metrics {
-    cacheHits: number = 0;
-    cacheMisses: number = 0;
     fixedResponses: number = 0;
     readonly localRequests = new RequestProtocolMetrics();
     readonly remoteRequests = new RequestProtocolMetrics();
-    requestErrors: number = 0;
+    remoteRequestErrors: number = 0;
     responseQuestionCacheKeyMismatch: number = 0;
 }
 
@@ -564,13 +562,12 @@ class DNSProxy {
 
         const nowSeconds = getNowSeconds();
 
-        const expiredQuestionCacheKeys = this.questionToResponseCache.periodicCleanUp(nowSeconds);
+        const expiredCacheKeys = this.questionToResponseCache.periodicCleanUp(nowSeconds);
 
         const logData = {
             metrics: this.metrics,
-            expiredQuestionCacheKeys,
-            questionToResponseMapSize: this.questionToResponseCache.mapSize,
-            questionToResponseQueueSize: this.questionToResponseCache.queueSize
+            expiredCacheKeys,
+            cacheStats: this.questionToResponseCache.stats
         };
 
         logger.info(`end timer pop ${stringify(logData)}`);
@@ -610,14 +607,10 @@ class DNSProxy {
                 clientRemoteInfo.writeResponse(cachedResponse);
 
                 responded = true;
-
-                ++this.metrics.cacheHits;
             }
         }
 
         if (!responded) {
-            ++this.metrics.cacheMisses;
-
             const outgoingRequestInfo =
                 new OutgoingRequestInfo(
                     clientRemoteInfo,
@@ -628,7 +621,7 @@ class DNSProxy {
             try {
                 response = await this.http2RemoteServerConnection.writeRequest(decodedRequestObject);
             } catch (err) {
-                ++this.metrics.requestErrors;
+                ++this.metrics.remoteRequestErrors;
                 logger.error(`http2RemoteServerConnection.writeRequest error err = ${formatError(err)}`);
             }
 

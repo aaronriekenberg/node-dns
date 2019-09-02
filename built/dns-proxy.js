@@ -152,12 +152,10 @@ class RequestProtocolMetrics {
 }
 class Metrics {
     constructor() {
-        this.cacheHits = 0;
-        this.cacheMisses = 0;
         this.fixedResponses = 0;
         this.localRequests = new RequestProtocolMetrics();
         this.remoteRequests = new RequestProtocolMetrics();
-        this.requestErrors = 0;
+        this.remoteRequestErrors = 0;
         this.responseQuestionCacheKeyMismatch = 0;
     }
 }
@@ -443,12 +441,11 @@ class DNSProxy {
     timerPop() {
         logger.info('begin timer pop');
         const nowSeconds = getNowSeconds();
-        const expiredQuestionCacheKeys = this.questionToResponseCache.periodicCleanUp(nowSeconds);
+        const expiredCacheKeys = this.questionToResponseCache.periodicCleanUp(nowSeconds);
         const logData = {
             metrics: this.metrics,
-            expiredQuestionCacheKeys,
-            questionToResponseMapSize: this.questionToResponseCache.mapSize,
-            questionToResponseQueueSize: this.questionToResponseCache.queueSize
+            expiredCacheKeys,
+            cacheStats: this.questionToResponseCache.stats
         };
         logger.info(`end timer pop ${stringify(logData)}`);
     }
@@ -476,18 +473,16 @@ class DNSProxy {
                 cachedResponse.id = decodedRequestObject.id;
                 clientRemoteInfo.writeResponse(cachedResponse);
                 responded = true;
-                ++this.metrics.cacheHits;
             }
         }
         if (!responded) {
-            ++this.metrics.cacheMisses;
             const outgoingRequestInfo = new OutgoingRequestInfo(clientRemoteInfo, questionCacheKey);
             let response;
             try {
                 response = await this.http2RemoteServerConnection.writeRequest(decodedRequestObject);
             }
             catch (err) {
-                ++this.metrics.requestErrors;
+                ++this.metrics.remoteRequestErrors;
                 logger.error(`http2RemoteServerConnection.writeRequest error err = ${formatError(err)}`);
             }
             if (response) {

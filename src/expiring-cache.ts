@@ -30,11 +30,22 @@ class ExpiringCacheEntry<K, V> implements Expirable {
 
 }
 
+export interface Stats {
+    hits: number,
+    misses: number,
+    mapSize: number,
+    queueSize: number
+};
+
 export default class ExpiringCache<K, V> {
 
     private readonly map = new Map<K, ExpiringCacheEntry<K, V>>();
 
     private readonly priorityQueue = new TinyQueue<ExpiringCacheEntry<K, V>>([], expirableComparator);
+
+    private hits: number = 0;
+
+    private misses: number = 0;
 
     add(key: K, value: V, expirationTimeSeconds: number) {
         const cacheEntry = new ExpiringCacheEntry(key, value, expirationTimeSeconds);
@@ -46,7 +57,10 @@ export default class ExpiringCache<K, V> {
         let value: V | undefined;
         const mapEntry = this.map.get(key);
         if (mapEntry) {
+            ++this.hits;
             value = mapEntry.value;
+        } else {
+            ++this.misses;
         }
         return value;
     }
@@ -83,6 +97,15 @@ export default class ExpiringCache<K, V> {
 
     get queueSize(): number {
         return this.priorityQueue.length;
+    }
+
+    get stats(): Stats {
+        return {
+            hits: this.hits,
+            misses: this.misses,
+            mapSize: this.mapSize,
+            queueSize: this.queueSize
+        };
     }
 
 }

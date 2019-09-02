@@ -25,10 +25,13 @@ class ExpiringCacheEntry {
         return nowSeconds >= this.expirationTimeSeconds;
     }
 }
+;
 class ExpiringCache {
     constructor() {
         this.map = new Map();
         this.priorityQueue = new tinyqueue_1.default([], expirableComparator);
+        this.hits = 0;
+        this.misses = 0;
     }
     add(key, value, expirationTimeSeconds) {
         const cacheEntry = new ExpiringCacheEntry(key, value, expirationTimeSeconds);
@@ -39,7 +42,11 @@ class ExpiringCache {
         let value;
         const mapEntry = this.map.get(key);
         if (mapEntry) {
+            ++this.hits;
             value = mapEntry.value;
+        }
+        else {
+            ++this.misses;
         }
         return value;
     }
@@ -71,6 +78,14 @@ class ExpiringCache {
     }
     get queueSize() {
         return this.priorityQueue.length;
+    }
+    get stats() {
+        return {
+            hits: this.hits,
+            misses: this.misses,
+            mapSize: this.mapSize,
+            queueSize: this.queueSize
+        };
     }
 }
 exports.default = ExpiringCache;
