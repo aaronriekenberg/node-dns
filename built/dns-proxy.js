@@ -317,7 +317,7 @@ class Http2RemoteServerConnection {
                 reject(new Error(`http2 request timeout`));
             });
             request.once('end', () => {
-                if (responseChunks.length == 0) {
+                if (responseChunks.length === 0) {
                     reject(new Error('responseChunks empty'));
                 }
                 else {

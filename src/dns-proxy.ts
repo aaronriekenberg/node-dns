@@ -386,7 +386,7 @@ class Http2RemoteServerConnection {
             });
 
             request.once('end', () => {
-                if (responseChunks.length == 0) {
+                if (responseChunks.length === 0) {
                     reject(new Error('responseChunks empty'));
                 } else {
                     const responseBuffer = Buffer.concat(responseChunks);
