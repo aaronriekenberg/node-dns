@@ -137,16 +137,6 @@ class ClientRemoteInfo {
     }
 }
 
-class OutgoingRequestInfo {
-
-    constructor(
-        readonly clientRemoteInfo: ClientRemoteInfo,
-        readonly questionCacheKey: string) {
-
-    }
-
-}
-
 class CacheObject {
 
     constructor(

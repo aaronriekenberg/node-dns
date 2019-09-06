@@ -130,12 +130,6 @@ class ClientRemoteInfo {
         return ((this.udpSocket !== null) && (this.udpRemoteInfo !== null));
     }
 }
-class OutgoingRequestInfo {
-    constructor(clientRemoteInfo, questionCacheKey) {
-        this.clientRemoteInfo = clientRemoteInfo;
-        this.questionCacheKey = questionCacheKey;
-    }
-}
 class CacheObject {
     constructor(expirationTimeSeconds, decodedResponse, cacheTimeSeconds) {
         this.expirationTimeSeconds = expirationTimeSeconds;
