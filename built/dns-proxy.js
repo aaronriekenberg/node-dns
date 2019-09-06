@@ -139,7 +139,6 @@ class CacheObject {
 }
 class RequestProtocolMetrics {
     constructor() {
-        this.http2 = 0;
         this.udp = 0;
         this.tcp = 0;
     }
@@ -148,7 +147,7 @@ class Metrics {
     constructor() {
         this.fixedResponses = 0;
         this.localRequests = new RequestProtocolMetrics();
-        this.remoteRequests = new RequestProtocolMetrics();
+        this.remoteRequests = 0;
         this.remoteRequestErrors = 0;
     }
 }
@@ -268,12 +267,11 @@ class TCPLocalServer {
 }
 // https://tools.ietf.org/html/rfc8484
 class Http2RemoteServerConnection {
-    constructor(url, path, sessionTimeoutMilliseconds, requestTimeoutMilliseconds, metrics) {
+    constructor(url, path, sessionTimeoutMilliseconds, requestTimeoutMilliseconds) {
         this.url = url;
         this.path = path;
         this.sessionTimeoutMilliseconds = sessionTimeoutMilliseconds;
         this.requestTimeoutMilliseconds = requestTimeoutMilliseconds;
-        this.metrics = metrics;
         this.clientHttp2Session = null;
     }
     writeRequest(dnsRequest) {
@@ -290,7 +288,6 @@ class Http2RemoteServerConnection {
                 reject(new Error('clientHttp2Session invalid state'));
                 return;
             }
-            ++this.metrics.remoteRequests.http2;
             const request = this.clientHttp2Session.request({
                 'content-type': 'application/dns-message',
                 'content-length': outgoingRequestBuffer.length,
@@ -361,7 +358,7 @@ class DNSProxy {
         this.localServers = [];
         this.localServers.push(new UDPLocalServer(configuration, this.metrics, (decodeDNSPacket, clientRemoteInfo) => this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo)));
         this.localServers.push(new TCPLocalServer(configuration, this.metrics, (decodeDNSPacket, clientRemoteInfo) => this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo)));
-        this.http2RemoteServerConnection = new Http2RemoteServerConnection(configuration.remoteHttp2Configuration.url, configuration.remoteHttp2Configuration.path, configuration.remoteHttp2Configuration.sessionTimeoutSeconds * 1000, configuration.remoteHttp2Configuration.requestTimeoutSeconds * 1000, this.metrics);
+        this.http2RemoteServerConnection = new Http2RemoteServerConnection(configuration.remoteHttp2Configuration.url, configuration.remoteHttp2Configuration.path, configuration.remoteHttp2Configuration.sessionTimeoutSeconds * 1000, configuration.remoteHttp2Configuration.requestTimeoutSeconds * 1000);
     }
     getQuestionCacheKey(questions) {
         let key = '';
@@ -477,6 +474,7 @@ class DNSProxy {
     async sendRemoteRequest(clientRemoteInfo, request) {
         let response;
         try {
+            ++this.metrics.remoteRequests;
             response = await this.http2RemoteServerConnection.writeRequest(request);
         }
         catch (err) {

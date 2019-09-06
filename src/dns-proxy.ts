@@ -149,7 +149,6 @@ class CacheObject {
 }
 
 class RequestProtocolMetrics {
-    http2: number = 0;
     udp: number = 0;
     tcp: number = 0;
 }
@@ -157,7 +156,7 @@ class RequestProtocolMetrics {
 class Metrics {
     fixedResponses: number = 0;
     readonly localRequests = new RequestProtocolMetrics();
-    readonly remoteRequests = new RequestProtocolMetrics();
+    remoteRequests: number = 0;
     remoteRequestErrors: number = 0;
 }
 
@@ -325,8 +324,7 @@ class Http2RemoteServerConnection {
         private readonly url: string,
         private readonly path: string,
         private readonly sessionTimeoutMilliseconds: number,
-        private readonly requestTimeoutMilliseconds: number,
-        private readonly metrics: Metrics) {
+        private readonly requestTimeoutMilliseconds: number) {
 
     }
 
@@ -349,8 +347,6 @@ class Http2RemoteServerConnection {
                 reject(new Error('clientHttp2Session invalid state'));
                 return;
             }
-
-            ++this.metrics.remoteRequests.http2;
 
             const request = this.clientHttp2Session.request({
                 'content-type': 'application/dns-message',
@@ -459,8 +455,7 @@ class DNSProxy {
             configuration.remoteHttp2Configuration.url,
             configuration.remoteHttp2Configuration.path,
             configuration.remoteHttp2Configuration.sessionTimeoutSeconds * 1000,
-            configuration.remoteHttp2Configuration.requestTimeoutSeconds * 1000,
-            this.metrics);
+            configuration.remoteHttp2Configuration.requestTimeoutSeconds * 1000);
     }
 
     private getQuestionCacheKey(questions?: dnsPacket.DNSQuestion[]): string {
@@ -612,6 +607,7 @@ class DNSProxy {
         let response: dnsPacket.DNSPacket | undefined;
 
         try {
+            ++this.metrics.remoteRequests;
             response = await this.http2RemoteServerConnection.writeRequest(request);
         } catch (err) {
             ++this.metrics.remoteRequestErrors;
