@@ -199,9 +199,8 @@ const createUDPSocket = (socketBufferSizes) => {
     });
 };
 class UDPLocalServer {
-    constructor(configuration, metrics, callback) {
+    constructor(configuration, callback) {
         this.configuration = configuration;
-        this.metrics = metrics;
         this.callback = callback;
         this.udpServerSocket = createUDPSocket(configuration.udpSocketBufferSizes);
     }
@@ -220,7 +219,6 @@ class UDPLocalServer {
         this.udpServerSocket.on('message', (message, remoteInfo) => {
             const decodedMessage = decodeDNSPacket(message);
             if (decodedMessage) {
-                ++this.metrics.localRequests.udp;
                 this.callback(decodedMessage, ClientRemoteInfo.createUDP(this.udpServerSocket, remoteInfo));
             }
         });
@@ -228,9 +226,8 @@ class UDPLocalServer {
     }
 }
 class TCPLocalServer {
-    constructor(configuration, metrics, callback) {
+    constructor(configuration, callback) {
         this.configuration = configuration;
-        this.metrics = metrics;
         this.callback = callback;
         this.tcpServerSocket = net.createServer();
     }
@@ -254,7 +251,6 @@ class TCPLocalServer {
             connection.on('close', () => {
             });
             connection.on('data', createTCPDataHandler((decodedMessage) => {
-                ++this.metrics.localRequests.tcp;
                 this.callback(decodedMessage, ClientRemoteInfo.createTCP(connection));
             }));
             connection.on('timeout', () => {
@@ -267,12 +263,12 @@ class TCPLocalServer {
 }
 // https://tools.ietf.org/html/rfc8484
 class Http2RemoteServerConnection {
-    constructor(url, path, sessionTimeoutMilliseconds, requestTimeoutMilliseconds) {
-        this.url = url;
-        this.path = path;
-        this.sessionTimeoutMilliseconds = sessionTimeoutMilliseconds;
-        this.requestTimeoutMilliseconds = requestTimeoutMilliseconds;
+    constructor(configuration) {
         this.clientHttp2Session = null;
+        this.url = configuration.url;
+        this.path = configuration.path;
+        this.requestTimeoutMilliseconds = configuration.requestTimeoutSeconds * 1000;
+        this.sessionTimeoutMilliseconds = configuration.sessionTimeoutSeconds * 1000;
     }
     writeRequest(dnsRequest) {
         return new Promise((resolve, reject) => {
@@ -356,9 +352,15 @@ class DNSProxy {
         this.questionToFixedResponse = new Map();
         this.questionToResponseCache = new expiring_cache_1.default();
         this.localServers = [];
-        this.localServers.push(new UDPLocalServer(configuration, this.metrics, (decodeDNSPacket, clientRemoteInfo) => this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo)));
-        this.localServers.push(new TCPLocalServer(configuration, this.metrics, (decodeDNSPacket, clientRemoteInfo) => this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo)));
-        this.http2RemoteServerConnection = new Http2RemoteServerConnection(configuration.remoteHttp2Configuration.url, configuration.remoteHttp2Configuration.path, configuration.remoteHttp2Configuration.sessionTimeoutSeconds * 1000, configuration.remoteHttp2Configuration.requestTimeoutSeconds * 1000);
+        this.localServers.push(new UDPLocalServer(configuration, (decodeDNSPacket, clientRemoteInfo) => {
+            ++this.metrics.localRequests.udp;
+            this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo);
+        }));
+        this.localServers.push(new TCPLocalServer(configuration, (decodeDNSPacket, clientRemoteInfo) => {
+            ++this.metrics.localRequests.tcp;
+            this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo);
+        }));
+        this.http2RemoteServerConnection = new Http2RemoteServerConnection(configuration.remoteHttp2Configuration);
     }
     getQuestionCacheKey(questions) {
         let key = '';

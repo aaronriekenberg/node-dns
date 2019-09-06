@@ -224,7 +224,6 @@ class UDPLocalServer implements LocalServer {
 
     constructor(
         private readonly configuration: configuration.Configuration,
-        private readonly metrics: Metrics,
         private readonly callback: MessageAndClientRemoteInfoCallback) {
 
         this.udpServerSocket = createUDPSocket(configuration.udpSocketBufferSizes);
@@ -248,7 +247,6 @@ class UDPLocalServer implements LocalServer {
         this.udpServerSocket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
             const decodedMessage = decodeDNSPacket(message);
             if (decodedMessage) {
-                ++this.metrics.localRequests.udp;
                 this.callback(decodedMessage, ClientRemoteInfo.createUDP(this.udpServerSocket, remoteInfo));
             }
         });
@@ -265,7 +263,6 @@ class TCPLocalServer implements LocalServer {
 
     constructor(
         private readonly configuration: configuration.Configuration,
-        private readonly metrics: Metrics,
         private readonly callback: MessageAndClientRemoteInfoCallback) {
 
         this.tcpServerSocket = net.createServer();
@@ -298,7 +295,6 @@ class TCPLocalServer implements LocalServer {
             });
 
             connection.on('data', createTCPDataHandler((decodedMessage) => {
-                ++this.metrics.localRequests.tcp;
                 this.callback(decodedMessage, ClientRemoteInfo.createTCP(connection))
             }));
 
@@ -320,12 +316,20 @@ class Http2RemoteServerConnection {
 
     private clientHttp2Session: http2.ClientHttp2Session | null = null;
 
-    constructor(
-        private readonly url: string,
-        private readonly path: string,
-        private readonly sessionTimeoutMilliseconds: number,
-        private readonly requestTimeoutMilliseconds: number) {
+    private readonly url: string;
 
+    private readonly path: string;
+
+    private readonly requestTimeoutMilliseconds: number;
+
+    private readonly sessionTimeoutMilliseconds: number;
+
+    constructor(
+        configuration: configuration.RemoteHttp2Configuration) {
+        this.url = configuration.url;
+        this.path = configuration.path;
+        this.requestTimeoutMilliseconds = configuration.requestTimeoutSeconds * 1000;
+        this.sessionTimeoutMilliseconds = configuration.sessionTimeoutSeconds * 1000;
     }
 
     writeRequest(dnsRequest: dnsPacket.DNSPacket): Promise<dnsPacket.DNSPacket> {
@@ -442,20 +446,20 @@ class DNSProxy {
         this.localServers.push(
             new UDPLocalServer(
                 configuration,
-                this.metrics,
-                (decodeDNSPacket, clientRemoteInfo) => this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo)));
+                (decodeDNSPacket, clientRemoteInfo) => {
+                    ++this.metrics.localRequests.udp;
+                    this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo);
+                }));
 
         this.localServers.push(
             new TCPLocalServer(
                 configuration,
-                this.metrics,
-                (decodeDNSPacket, clientRemoteInfo) => this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo)));
+                (decodeDNSPacket, clientRemoteInfo) => {
+                    ++this.metrics.localRequests.tcp;
+                    this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo);
+                }));
 
-        this.http2RemoteServerConnection = new Http2RemoteServerConnection(
-            configuration.remoteHttp2Configuration.url,
-            configuration.remoteHttp2Configuration.path,
-            configuration.remoteHttp2Configuration.sessionTimeoutSeconds * 1000,
-            configuration.remoteHttp2Configuration.requestTimeoutSeconds * 1000);
+        this.http2RemoteServerConnection = new Http2RemoteServerConnection(configuration.remoteHttp2Configuration);
     }
 
     private getQuestionCacheKey(questions?: dnsPacket.DNSQuestion[]): string {
