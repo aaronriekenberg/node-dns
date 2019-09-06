@@ -392,7 +392,8 @@ class DNSProxy {
         logger.info(`questionToFixedResponse.size = ${this.questionToFixedResponse.size}`);
     }
     getMinTTLSecondsForResponse(response) {
-        let minTTL;
+        let foundRRHeaderTTL = false;
+        let minTTL = this.configuration.minTTLSeconds;
         const processObject = (object) => {
             if ((!isNumber(object.ttl)) || (object.ttl < this.configuration.minTTLSeconds)) {
                 object.ttl = this.configuration.minTTLSeconds;
@@ -401,8 +402,9 @@ class DNSProxy {
                 object.ttl = this.configuration.maxTTLSeconds;
             }
             object[DNSProxy.originalTTLSymbol] = object.ttl;
-            if ((minTTL === undefined) || (object.ttl < minTTL)) {
+            if ((!foundRRHeaderTTL) || (object.ttl < minTTL)) {
                 minTTL = object.ttl;
+                foundRRHeaderTTL = true;
             }
         };
         (response.answers || []).forEach((answer) => processObject(answer));

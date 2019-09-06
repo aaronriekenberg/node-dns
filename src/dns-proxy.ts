@@ -502,7 +502,8 @@ class DNSProxy {
     private getMinTTLSecondsForResponse(
         response: dnsPacket.DNSPacket): number | undefined {
 
-        let minTTL: number | undefined;
+        let foundRRHeaderTTL = false;
+        let minTTL = this.configuration.minTTLSeconds;
 
         const processObject = (object: { ttl?: number, [DNSProxy.originalTTLSymbol]?: number }) => {
             if ((!isNumber(object.ttl)) || (object.ttl < this.configuration.minTTLSeconds)) {
@@ -512,8 +513,10 @@ class DNSProxy {
                 object.ttl = this.configuration.maxTTLSeconds;
             }
             object[DNSProxy.originalTTLSymbol] = object.ttl;
-            if ((minTTL === undefined) || (object.ttl < minTTL)) {
+
+            if ((!foundRRHeaderTTL) || (object.ttl < minTTL)) {
                 minTTL = object.ttl;
+                foundRRHeaderTTL = true;
             }
         };
 
