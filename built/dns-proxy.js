@@ -1,14 +1,26 @@
 #!/usr/bin/env node
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
 var __importStar = (this && this.__importStar) || function (mod) {
     if (mod && mod.__esModule) return mod;
     var result = {};
-    if (mod != null) for (var k in mod) if (Object.hasOwnProperty.call(mod, k)) result[k] = mod[k];
-    result["default"] = mod;
+    if (mod != null) for (var k in mod) if (Object.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
     return result;
+};
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const expiring_cache_1 = __importDefault(require("./expiring-cache"));
@@ -345,175 +357,178 @@ class Http2RemoteServerConnection {
         this.clientHttp2Session = clientHttp2Session;
     }
 }
-class DNSProxy {
-    constructor(configuration) {
-        this.configuration = configuration;
-        this.metrics = new Metrics();
-        this.questionToFixedResponse = new Map();
-        this.questionToResponseCache = new expiring_cache_1.default();
-        this.localServers = [];
-        this.localServers.push(new UDPLocalServer(configuration, (decodeDNSPacket, clientRemoteInfo) => {
-            ++this.metrics.localRequests.udp;
-            this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo);
-        }));
-        this.localServers.push(new TCPLocalServer(configuration, (decodeDNSPacket, clientRemoteInfo) => {
-            ++this.metrics.localRequests.tcp;
-            this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo);
-        }));
-        this.http2RemoteServerConnection = new Http2RemoteServerConnection(configuration.remoteHttp2Configuration);
-    }
-    getQuestionCacheKey(questions) {
-        let key = '';
-        let firstQuestion = true;
-        (questions || []).forEach((question) => {
-            if (!firstQuestion) {
-                key += '|';
-            }
-            key += `name:${question.name}_type:${question.type}_class:${question.class}`.toLowerCase();
-            firstQuestion = false;
-        });
-        return key;
-    }
-    buildFixedResponses() {
-        (this.configuration.fixedResponses || []).forEach((fixedResponse) => {
-            const questionCacheKey = this.getQuestionCacheKey(fixedResponse.questions);
-            if (!questionCacheKey) {
-                throw new Error('fixed response missing questions');
-            }
-            this.questionToFixedResponse.set(questionCacheKey, fixedResponse);
-        });
-        logger.info(`questionToFixedResponse.size = ${this.questionToFixedResponse.size}`);
-    }
-    getMinTTLSecondsForResponse(response) {
-        let foundRRHeaderTTL = false;
-        let minTTL = this.configuration.minTTLSeconds;
-        const processObject = (object) => {
-            if ((!isNumber(object.ttl)) || (object.ttl < this.configuration.minTTLSeconds)) {
-                object.ttl = this.configuration.minTTLSeconds;
-            }
-            if (object.ttl > this.configuration.maxTTLSeconds) {
-                object.ttl = this.configuration.maxTTLSeconds;
-            }
-            object[DNSProxy.originalTTLSymbol] = object.ttl;
-            if ((!foundRRHeaderTTL) || (object.ttl < minTTL)) {
-                minTTL = object.ttl;
-                foundRRHeaderTTL = true;
-            }
-        };
-        (response.answers || []).forEach((answer) => processObject(answer));
-        (response.additionals || []).forEach((additional) => processObject(additional));
-        (response.authorities || []).forEach((authority) => processObject(authority));
-        return minTTL;
-    }
-    adjustTTL(cacheObject) {
-        let valid = true;
-        const nowSeconds = getNowSeconds();
-        const secondsUntilExpiration = cacheObject.expirationTimeSeconds - nowSeconds;
-        if (secondsUntilExpiration <= 0) {
-            valid = false;
+let DNSProxy = /** @class */ (() => {
+    class DNSProxy {
+        constructor(configuration) {
+            this.configuration = configuration;
+            this.metrics = new Metrics();
+            this.questionToFixedResponse = new Map();
+            this.questionToResponseCache = new expiring_cache_1.default();
+            this.localServers = [];
+            this.localServers.push(new UDPLocalServer(configuration, (decodeDNSPacket, clientRemoteInfo) => {
+                ++this.metrics.localRequests.udp;
+                this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo);
+            }));
+            this.localServers.push(new TCPLocalServer(configuration, (decodeDNSPacket, clientRemoteInfo) => {
+                ++this.metrics.localRequests.tcp;
+                this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo);
+            }));
+            this.http2RemoteServerConnection = new Http2RemoteServerConnection(configuration.remoteHttp2Configuration);
         }
-        else {
-            const secondsInCache = nowSeconds - cacheObject.cacheTimeSeconds;
-            const adjustObject = (object) => {
-                const originalTTL = object[DNSProxy.originalTTLSymbol];
-                if (!isNumber(originalTTL)) {
-                    valid = false;
+        getQuestionCacheKey(questions) {
+            let key = '';
+            let firstQuestion = true;
+            (questions || []).forEach((question) => {
+                if (!firstQuestion) {
+                    key += '|';
                 }
-                else {
-                    object.ttl = originalTTL - secondsInCache;
-                    if (object.ttl <= 0) {
-                        valid = false;
-                    }
+                key += `name:${question.name}_type:${question.type}_class:${question.class}`.toLowerCase();
+                firstQuestion = false;
+            });
+            return key;
+        }
+        buildFixedResponses() {
+            (this.configuration.fixedResponses || []).forEach((fixedResponse) => {
+                const questionCacheKey = this.getQuestionCacheKey(fixedResponse.questions);
+                if (!questionCacheKey) {
+                    throw new Error('fixed response missing questions');
+                }
+                this.questionToFixedResponse.set(questionCacheKey, fixedResponse);
+            });
+            logger.info(`questionToFixedResponse.size = ${this.questionToFixedResponse.size}`);
+        }
+        getMinTTLSecondsForResponse(response) {
+            let foundRRHeaderTTL = false;
+            let minTTL = this.configuration.minTTLSeconds;
+            const processObject = (object) => {
+                if ((!isNumber(object.ttl)) || (object.ttl < this.configuration.minTTLSeconds)) {
+                    object.ttl = this.configuration.minTTLSeconds;
+                }
+                if (object.ttl > this.configuration.maxTTLSeconds) {
+                    object.ttl = this.configuration.maxTTLSeconds;
+                }
+                object[DNSProxy.originalTTLSymbol] = object.ttl;
+                if ((!foundRRHeaderTTL) || (object.ttl < minTTL)) {
+                    minTTL = object.ttl;
+                    foundRRHeaderTTL = true;
                 }
             };
-            (cacheObject.decodedResponse.answers || []).forEach((answer) => adjustObject(answer));
-            (cacheObject.decodedResponse.additionals || []).forEach((additional) => adjustObject(additional));
-            (cacheObject.decodedResponse.authorities || []).forEach((authority) => adjustObject(authority));
+            (response.answers || []).forEach((answer) => processObject(answer));
+            (response.additionals || []).forEach((additional) => processObject(additional));
+            (response.authorities || []).forEach((authority) => processObject(authority));
+            return minTTL;
         }
-        return valid;
-    }
-    timerPop() {
-        logger.info('begin timer pop');
-        const nowSeconds = getNowSeconds();
-        const expiredCacheKeys = this.questionToResponseCache.periodicCleanUp(nowSeconds);
-        const logData = {
-            metrics: this.metrics,
-            expiredCacheKeys,
-            cacheStats: this.questionToResponseCache.stats
-        };
-        logger.info(`end timer pop ${stringify(logData)}`);
-    }
-    handleLocalRequest(decodedRequestObject, clientRemoteInfo) {
-        // logger.info(`handleLocalRequest message remoteInfo = ${stringifyPretty(clientRemoteInfo)}\ndecodedRequestObject = ${stringifyPretty(decodedRequestObject)}`);
-        if ((!isNumber(decodedRequestObject.id)) || (!decodedRequestObject.questions)) {
-            logger.warn(`handleLocalRequest invalid decodedRequestObject ${decodedRequestObject}`);
-            return;
+        adjustTTL(cacheObject) {
+            let valid = true;
+            const nowSeconds = getNowSeconds();
+            const secondsUntilExpiration = cacheObject.expirationTimeSeconds - nowSeconds;
+            if (secondsUntilExpiration <= 0) {
+                valid = false;
+            }
+            else {
+                const secondsInCache = nowSeconds - cacheObject.cacheTimeSeconds;
+                const adjustObject = (object) => {
+                    const originalTTL = object[DNSProxy.originalTTLSymbol];
+                    if (!isNumber(originalTTL)) {
+                        valid = false;
+                    }
+                    else {
+                        object.ttl = originalTTL - secondsInCache;
+                        if (object.ttl <= 0) {
+                            valid = false;
+                        }
+                    }
+                };
+                (cacheObject.decodedResponse.answers || []).forEach((answer) => adjustObject(answer));
+                (cacheObject.decodedResponse.additionals || []).forEach((additional) => adjustObject(additional));
+                (cacheObject.decodedResponse.authorities || []).forEach((authority) => adjustObject(authority));
+            }
+            return valid;
         }
-        let responded = false;
-        const questionCacheKey = this.getQuestionCacheKey(decodedRequestObject.questions);
-        if (!responded) {
-            const fixedResponse = this.questionToFixedResponse.get(questionCacheKey);
-            if (fixedResponse) {
-                fixedResponse.id = decodedRequestObject.id;
-                clientRemoteInfo.writeResponse(fixedResponse);
-                responded = true;
-                ++this.metrics.fixedResponses;
+        timerPop() {
+            logger.info('begin timer pop');
+            const nowSeconds = getNowSeconds();
+            const expiredCacheKeys = this.questionToResponseCache.periodicCleanUp(nowSeconds);
+            const logData = {
+                metrics: this.metrics,
+                expiredCacheKeys,
+                cacheStats: this.questionToResponseCache.stats
+            };
+            logger.info(`end timer pop ${stringify(logData)}`);
+        }
+        handleLocalRequest(decodedRequestObject, clientRemoteInfo) {
+            // logger.info(`handleLocalRequest message remoteInfo = ${stringifyPretty(clientRemoteInfo)}\ndecodedRequestObject = ${stringifyPretty(decodedRequestObject)}`);
+            if ((!isNumber(decodedRequestObject.id)) || (!decodedRequestObject.questions)) {
+                logger.warn(`handleLocalRequest invalid decodedRequestObject ${decodedRequestObject}`);
+                return;
+            }
+            let responded = false;
+            const questionCacheKey = this.getQuestionCacheKey(decodedRequestObject.questions);
+            if (!responded) {
+                const fixedResponse = this.questionToFixedResponse.get(questionCacheKey);
+                if (fixedResponse) {
+                    fixedResponse.id = decodedRequestObject.id;
+                    clientRemoteInfo.writeResponse(fixedResponse);
+                    responded = true;
+                    ++this.metrics.fixedResponses;
+                }
+            }
+            if (!responded) {
+                const cacheObject = this.questionToResponseCache.get(questionCacheKey);
+                if (cacheObject && this.adjustTTL(cacheObject)) {
+                    const cachedResponse = cacheObject.decodedResponse;
+                    cachedResponse.id = decodedRequestObject.id;
+                    clientRemoteInfo.writeResponse(cachedResponse);
+                    responded = true;
+                }
+            }
+            if (!responded) {
+                this.sendRemoteRequest(clientRemoteInfo, decodedRequestObject);
             }
         }
-        if (!responded) {
-            const cacheObject = this.questionToResponseCache.get(questionCacheKey);
-            if (cacheObject && this.adjustTTL(cacheObject)) {
-                const cachedResponse = cacheObject.decodedResponse;
-                cachedResponse.id = decodedRequestObject.id;
-                clientRemoteInfo.writeResponse(cachedResponse);
-                responded = true;
+        async sendRemoteRequest(clientRemoteInfo, request) {
+            let response;
+            try {
+                ++this.metrics.remoteRequests;
+                response = await this.http2RemoteServerConnection.writeRequest(request);
+            }
+            catch (err) {
+                ++this.metrics.remoteRequestErrors;
+                logger.error(`http2RemoteServerConnection.writeRequest error err = ${formatError(err)}`);
+            }
+            if (response) {
+                this.handleRemoteResponse(clientRemoteInfo, response);
             }
         }
-        if (!responded) {
-            this.sendRemoteRequest(clientRemoteInfo, decodedRequestObject);
-        }
-    }
-    async sendRemoteRequest(clientRemoteInfo, request) {
-        let response;
-        try {
-            ++this.metrics.remoteRequests;
-            response = await this.http2RemoteServerConnection.writeRequest(request);
-        }
-        catch (err) {
-            ++this.metrics.remoteRequestErrors;
-            logger.error(`http2RemoteServerConnection.writeRequest error err = ${formatError(err)}`);
-        }
-        if (response) {
-            this.handleRemoteResponse(clientRemoteInfo, response);
-        }
-    }
-    handleRemoteResponse(clientRemoteInfo, decodedResponseObject) {
-        // logger.info(`handleRemoteResponse decodedResponseObject = ${stringifyPretty(decodedResponseObject)}`);
-        if (!isNumber(decodedResponseObject.id) || (!decodedResponseObject.questions)) {
-            logger.warn(`handleRemoteSocketMessage invalid decodedResponseObject ${decodedResponseObject}`);
-            return;
-        }
-        const responseQuestionCacheKey = this.getQuestionCacheKey(decodedResponseObject.questions);
-        if ((decodedResponseObject.rcode === 'NOERROR') ||
-            (decodedResponseObject.rcode === 'NXDOMAIN')) {
-            const minTTLSeconds = this.getMinTTLSecondsForResponse(decodedResponseObject);
-            if (isPositiveNumber(minTTLSeconds)) {
-                const nowSeconds = getNowSeconds();
-                const expirationTimeSeconds = nowSeconds + minTTLSeconds;
-                const cacheObject = new CacheObject(expirationTimeSeconds, decodedResponseObject, nowSeconds);
-                this.questionToResponseCache.add(responseQuestionCacheKey, cacheObject, expirationTimeSeconds);
+        handleRemoteResponse(clientRemoteInfo, decodedResponseObject) {
+            // logger.info(`handleRemoteResponse decodedResponseObject = ${stringifyPretty(decodedResponseObject)}`);
+            if (!isNumber(decodedResponseObject.id) || (!decodedResponseObject.questions)) {
+                logger.warn(`handleRemoteSocketMessage invalid decodedResponseObject ${decodedResponseObject}`);
+                return;
             }
+            const responseQuestionCacheKey = this.getQuestionCacheKey(decodedResponseObject.questions);
+            if ((decodedResponseObject.rcode === 'NOERROR') ||
+                (decodedResponseObject.rcode === 'NXDOMAIN')) {
+                const minTTLSeconds = this.getMinTTLSecondsForResponse(decodedResponseObject);
+                if (isPositiveNumber(minTTLSeconds)) {
+                    const nowSeconds = getNowSeconds();
+                    const expirationTimeSeconds = nowSeconds + minTTLSeconds;
+                    const cacheObject = new CacheObject(expirationTimeSeconds, decodedResponseObject, nowSeconds);
+                    this.questionToResponseCache.add(responseQuestionCacheKey, cacheObject, expirationTimeSeconds);
+                }
+            }
+            clientRemoteInfo.writeResponse(decodedResponseObject);
         }
-        clientRemoteInfo.writeResponse(decodedResponseObject);
+        start() {
+            logger.info('begin start');
+            this.buildFixedResponses();
+            this.localServers.forEach((localServer) => localServer.start());
+            setInterval(() => this.timerPop(), this.configuration.timerIntervalSeconds * 1000);
+        }
     }
-    start() {
-        logger.info('begin start');
-        this.buildFixedResponses();
-        this.localServers.forEach((localServer) => localServer.start());
-        setInterval(() => this.timerPop(), this.configuration.timerIntervalSeconds * 1000);
-    }
-}
-DNSProxy.originalTTLSymbol = Symbol('originalTTL');
+    DNSProxy.originalTTLSymbol = Symbol('originalTTL');
+    return DNSProxy;
+})();
 ;
 const readConfiguration = async (configFilePath) => {
     logger.info(`readConfiguration '${configFilePath}'`);
