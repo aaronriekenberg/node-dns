@@ -296,6 +296,7 @@ class Http2RemoteServerConnection {
                 reject(new Error('clientHttp2Session invalid state'));
                 return;
             }
+            let rejected = false;
             const request = this.clientHttp2Session.request({
                 'content-type': 'application/dns-message',
                 'content-length': outgoingRequestBuffer.length,
@@ -305,23 +306,42 @@ class Http2RemoteServerConnection {
             });
             const responseChunks = [];
             request.on('data', (chunk) => {
-                responseChunks.push(chunk);
+                if (!rejected) {
+                    responseChunks.push(chunk);
+                }
             });
             request.on('error', (error) => {
-                reject(new Error(`http2 request error error = ${formatError(error)}`));
+                if (!rejected) {
+                    rejected = true;
+                    reject(new Error(`http2 request error error = ${formatError(error)}`));
+                }
             });
             request.setTimeout(this.requestTimeoutMilliseconds);
             request.on('timeout', () => {
-                reject(new Error(`http2 request timeout`));
+                if (!rejected) {
+                    rejected = true;
+                    reject(new Error(`http2 request timeout`));
+                }
+            });
+            request.on('response', (headers) => {
+                if (!rejected && (headers[':status'] !== 200)) {
+                    rejected = true;
+                    reject(new Error(`got non-200 http status response ${headers[':status']}`));
+                }
             });
             request.once('end', () => {
-                if (responseChunks.length === 0) {
+                if (rejected) {
+                    // do nothing
+                }
+                else if (responseChunks.length === 0) {
+                    rejected = true;
                     reject(new Error('responseChunks empty'));
                 }
                 else {
                     const responseBuffer = Buffer.concat(responseChunks);
                     const response = decodeDNSPacket(responseBuffer);
                     if (!response) {
+                        rejected = true;
                         reject(new Error('error decoding dns packet'));
                     }
                     else {
