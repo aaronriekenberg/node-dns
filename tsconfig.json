@@ -6,12 +6,15 @@
         "types/*"
       ]
     },
-    "esModuleInterop": true,
-    "module": "CommonJS",
-    "moduleResolution": "Node",
+    "allowSyntheticDefaultImports": true,
+    "lib": [
+      "ES2020"
+    ],
+    "module": "ES2020",
+    "moduleResolution": "node",
+    "target": "ES2020",
     "outDir": "./built",
-    "strict": true,
-    "target": "ESNext"
+    "strict": true
   },
   "include": [
     "./src/**/*"

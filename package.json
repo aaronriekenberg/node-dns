@@ -14,5 +14,6 @@
     "tinyqueue": "^2.0.3",
     "typescript": "^3.9.5",
     "winston": "^3.2.1"
-  }
+  },
+  "type": "module"
 }

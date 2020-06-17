@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 
-import * as configuration from './configuration';
-import ExpiringCache from './expiring-cache';
+import * as configuration from './configuration.js';
+import ExpiringCache from './expiring-cache.js';
 import * as dnsPacket from 'dns-packet';
 import * as dgram from 'dgram';
 import * as fs from 'fs';
 import * as http2 from 'http2';
 import * as net from 'net';
 import * as process from 'process';
-import * as winston from 'winston';
+import winston from 'winston';
 
 const stringify = JSON.stringify;
 const stringifyPretty = (object: any) => stringify(object, null, 2);
