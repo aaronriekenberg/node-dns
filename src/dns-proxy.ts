@@ -2,12 +2,12 @@
 
 import * as configuration from './configuration.js';
 import ExpiringCache from './expiring-cache.js';
-import * as dnsPacket from 'dns-packet';
-import * as dgram from 'dgram';
-import * as fs from 'fs';
-import * as http2 from 'http2';
-import * as net from 'net';
-import * as process from 'process';
+import dnsPacket from 'dns-packet';
+import dgram from 'dgram';
+import fs from 'fs';
+import http2 from 'http2';
+import net from 'net';
+import process from 'process';
 import winston from 'winston';
 
 const stringify = JSON.stringify;

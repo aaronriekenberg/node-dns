@@ -1,4 +1,4 @@
-import * as dnsPacket from 'dns-packet';
+import dnsPacket from 'dns-packet';
 
 export interface SocketBufferSizes {
     readonly rcvbuf: number;
