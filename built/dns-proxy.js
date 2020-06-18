@@ -272,7 +272,6 @@ class Http2RemoteServerConnection {
                 reject(new Error('clientHttp2Session invalid state'));
                 return;
             }
-            let rejectedOrResolved = false;
             const request = this.clientHttp2Session.request({
                 'content-type': 'application/dns-message',
                 'content-length': outgoingRequestBuffer.length,
@@ -282,47 +281,37 @@ class Http2RemoteServerConnection {
             });
             const responseChunks = [];
             request.on('data', (chunk) => {
-                if (!rejectedOrResolved) {
-                    responseChunks.push(chunk);
-                }
+                responseChunks.push(chunk);
             });
             request.on('error', (error) => {
-                if (!rejectedOrResolved) {
-                    rejectedOrResolved = true;
-                    reject(new Error(`http2 request error error = ${formatError(error)}`));
-                }
+                request.close();
+                reject(new Error(`http2 request error error = ${formatError(error)}`));
             });
             request.setTimeout(this.requestTimeoutMilliseconds);
             request.on('timeout', () => {
-                if (!rejectedOrResolved) {
-                    rejectedOrResolved = true;
-                    reject(new Error(`http2 request timeout`));
-                }
+                request.close();
+                reject(new Error(`http2 request timeout`));
             });
             request.on('response', (headers) => {
-                if (!rejectedOrResolved && (headers[':status'] !== 200)) {
-                    rejectedOrResolved = true;
+                if (headers[':status'] !== 200) {
+                    request.close();
                     reject(new Error(`got non-200 http status response ${headers[':status']}`));
                 }
             });
             request.once('end', () => {
-                if (rejectedOrResolved) {
-                    // do nothing
-                }
-                else if (responseChunks.length === 0) {
-                    rejectedOrResolved = true;
+                if (responseChunks.length === 0) {
+                    request.close();
                     reject(new Error('responseChunks empty'));
                 }
                 else {
                     const responseBuffer = Buffer.concat(responseChunks);
                     const response = decodeDNSPacket(responseBuffer);
                     if (!response) {
-                        rejectedOrResolved = true;
+                        request.close();
                         reject(new Error('error decoding dns packet'));
                     }
                     else {
                         response.id = originalID;
-                        rejectedOrResolved = true;
                         resolve(response);
                     }
                 }
