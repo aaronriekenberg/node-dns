@@ -1,0 +1,12 @@
+# ~/.config/systemd/user/node-dns.service
+
+[Unit]
+AssertPathExists=%h/node-dns/built/dns-proxy.js
+
+[Service]
+WorkingDirectory=%h/node-dns
+ExecStart=%h/node-dns/built/dns-proxy.js ./config/%H-config.json
+Restart=always
+
+[Install]
+WantedBy=default.target
