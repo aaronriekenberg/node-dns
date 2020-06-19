@@ -28,7 +28,7 @@ const logger = winston.createLogger({
 
 const UTF8 = 'utf8';
 
-const asyncReadFile = async (filePath: string, encoding?: string) => {
+const asyncReadFile = async (filePath: string, encoding?: BufferEncoding) => {
     let fileHandle: fs.promises.FileHandle | undefined;
     try {
         fileHandle = await fs.promises.open(filePath, 'r');

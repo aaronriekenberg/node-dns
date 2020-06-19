@@ -9,7 +9,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@types/node": "^12.12.47",
+    "@types/node": "^14.0.13",
     "dns-packet": "^5.2.1",
     "tinyqueue": "^2.0.3",
     "typescript": "^3.9.5",
