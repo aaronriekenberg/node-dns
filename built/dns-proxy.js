@@ -325,7 +325,6 @@ class Http2RemoteServerConnection {
             if ((nowSeconds - this.sessionCreationTimeSeconds) > this.sessionMaxAgeSeconds) {
                 logger.info('this.clientHttp2Session is too old, destroying');
                 this.clientHttp2Session.destroy();
-                this.clientHttp2Session = null;
             }
             else {
                 return;
