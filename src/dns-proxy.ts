@@ -432,7 +432,7 @@ class Http2RemoteServerConnection {
 
         newClientHttp2Session.once('close', () => {
             logger.info('newClientHttp2Session on close');
-            if (this.clientHttp2Session == newClientHttp2Session) {
+            if (this.clientHttp2Session === newClientHttp2Session) {
                 this.clientHttp2Session = null;
                 logger.info('set this.clientHttp2Session = null');
             }
