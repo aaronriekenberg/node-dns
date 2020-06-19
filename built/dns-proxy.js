@@ -439,7 +439,6 @@ class DNSProxy {
         return valid;
     }
     timerPop() {
-        logger.info('begin timer pop');
         const nowSeconds = getNowSeconds();
         const expiredCacheKeys = this.questionToResponseCache.periodicCleanUp(nowSeconds);
         const logData = {

@@ -570,8 +570,6 @@ class DNSProxy {
     }
 
     private timerPop() {
-        logger.info('begin timer pop');
-
         const nowSeconds = getNowSeconds();
 
         const expiredCacheKeys = this.questionToResponseCache.periodicCleanUp(nowSeconds);
