@@ -12,6 +12,7 @@ export interface DNSAnswer {
 
 export interface DNSAdditional {
     ttl?: number;
+    type?: string;
 }
 
 export interface DNSAuthority {

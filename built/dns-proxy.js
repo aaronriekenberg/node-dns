@@ -399,7 +399,11 @@ class DNSProxy {
             }
         };
         (response.answers || []).forEach((answer) => processObject(answer));
-        (response.additionals || []).forEach((additional) => processObject(additional));
+        (response.additionals || []).forEach((additional) => {
+            if (additional.type !== "OPT") {
+                processObject(additional);
+            }
+        });
         (response.authorities || []).forEach((authority) => processObject(authority));
         return minTTL;
     }
@@ -425,7 +429,11 @@ class DNSProxy {
                 }
             };
             (cacheObject.decodedResponse.answers || []).forEach((answer) => adjustObject(answer));
-            (cacheObject.decodedResponse.additionals || []).forEach((additional) => adjustObject(additional));
+            (cacheObject.decodedResponse.additionals || []).forEach((additional) => {
+                if (additional.type !== "OPT") {
+                    adjustObject(additional);
+                }
+            });
             (cacheObject.decodedResponse.authorities || []).forEach((authority) => adjustObject(authority));
         }
         return valid;
