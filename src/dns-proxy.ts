@@ -438,7 +438,7 @@ class Http2RemoteServerConnection {
             }
         });
 
-        newClientHttp2Session.on('newClientHttp2Session', (error) => {
+        newClientHttp2Session.on('error', (error) => {
             logger.info(`newClientHttp2Session on error error = ${formatError(error)}`);
             newClientHttp2Session.destroy();
         });
