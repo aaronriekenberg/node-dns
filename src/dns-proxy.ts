@@ -1,139 +1,16 @@
 #!/usr/bin/env node
 
 import * as configuration from './configuration.js';
+import * as dohClient from './doh-client.js';
+import { logger } from './logging.js';
+import * as metrics from './metrics.js';
+import * as netUtils from './net-utils.js';
+import * as tcpServer from './tcp-server.js';
+import * as udpServer from './udp-server.js';
+import * as utils from './utils.js';
 import ExpiringCache from './expiring-cache.js';
 import dnsPacket from 'dns-packet';
-import dgram from 'dgram';
-import fs from 'fs';
-import http2 from 'http2';
-import net from 'net';
-import process, { config } from 'process';
-import winston from 'winston';
-
-const stringify = JSON.stringify;
-const stringifyPretty = (object: any) => stringify(object, null, 2);
-
-const formatError = (err: Error, includeStack = true) => {
-    return ((includeStack && err.stack) || err.message);
-};
-
-const LOG_DATE_TIME_FORMAT = 'YYYY-MM-DD[T]HH:mm:ss.SSSZZ';
-
-const logger = winston.createLogger({
-    format: winston.format.combine(winston.format.timestamp({
-        format: LOG_DATE_TIME_FORMAT
-    }), winston.format.printf((info) => `${info.timestamp} ${info.level}: ${info.message}`)),
-    transports: [new winston.transports.Console()]
-});
-
-const UTF8 = 'utf8';
-
-const asyncReadFile = async (filePath: string, encoding?: BufferEncoding) => {
-    let fileHandle: fs.promises.FileHandle | undefined;
-    try {
-        fileHandle = await fs.promises.open(filePath, 'r');
-        return await fileHandle.readFile({
-            encoding
-        });
-    } finally {
-        if (fileHandle) {
-            await fileHandle.close();
-        }
-    }
-};
-
-const getNowSeconds = (): number => {
-    return process.hrtime()[0];
-};
-
-const isNumber = (x: number | null | undefined): x is number => {
-    return (typeof x === 'number');
-};
-
-const isPositiveNumber = (x: number | null | undefined): x is number => {
-    return (isNumber(x) && (x > 0));
-};
-
-const writeDNSPacketToTCPSocket = (tcpSocket: net.Socket, packet: dnsPacket.DNSPacket) => {
-    try {
-        if (!tcpSocket.destroyed) {
-            tcpSocket.write(dnsPacket.streamEncode(packet));
-        }
-    } catch (err) {
-        logger.error(`writeDNSPacketToTCPSocket error err = ${formatError(err)}`);
-    }
-};
-
-const writeDNSPacketToUDPSocket = (udpSocket: dgram.Socket, port: number, address: string, packet: dnsPacket.DNSPacket) => {
-    try {
-        const outgoingMessage = dnsPacket.encode(packet);
-        udpSocket.send(outgoingMessage, port, address);
-    } catch (err) {
-        logger.error(`writeDNSPacketToUDPSocket error err = ${formatError(err)}`);
-    }
-};
-
-const streamDecodeDNSPacket = (buffer: Buffer): dnsPacket.DNSPacket | undefined => {
-    let packet: dnsPacket.DNSPacket | undefined;
-    try {
-        packet = dnsPacket.streamDecode(buffer);
-    } catch (err) {
-        logger.error(`streamDecodeDNSPacket error err = ${formatError(err)}`);
-    }
-    return packet;
-};
-
-const encodeDNSPacket = (packet: dnsPacket.DNSPacket): Buffer | undefined => {
-    let buffer: Buffer | undefined;
-    try {
-        buffer = dnsPacket.encode(packet);
-    } catch (err) {
-        logger.error(`encodeDNSPacket error err = ${formatError(err)}`);
-    }
-    return buffer;
-}
-
-const decodeDNSPacket = (buffer: Buffer): dnsPacket.DNSPacket | undefined => {
-    let packet: dnsPacket.DNSPacket | undefined;
-    try {
-        packet = dnsPacket.decode(buffer);
-    } catch (err) {
-        logger.error(`decodeDNSPacket error err = ${formatError(err)}`);
-    }
-    return packet;
-};
-
-class ClientRemoteInfo {
-
-    private constructor(
-        readonly udpSocket: dgram.Socket | null,
-        readonly udpRemoteInfo: dgram.RemoteInfo | null,
-        readonly tcpSocket: net.Socket | null) {
-
-    }
-
-    static createUDP(udpSocket: dgram.Socket, udpRemoteInfo: dgram.RemoteInfo): ClientRemoteInfo {
-        return new ClientRemoteInfo(udpSocket, udpRemoteInfo, null);
-    }
-
-    static createTCP(tcpSocket: net.Socket): ClientRemoteInfo {
-        return new ClientRemoteInfo(null, null, tcpSocket);
-    }
-
-    writeResponse(dnsResponse: dnsPacket.DNSPacket) {
-        if (this.udpSocket && this.udpRemoteInfo) {
-            writeDNSPacketToUDPSocket(this.udpSocket, this.udpRemoteInfo.port, this.udpRemoteInfo.address, dnsResponse);
-        }
-
-        else if (this.tcpSocket) {
-            writeDNSPacketToTCPSocket(this.tcpSocket, dnsResponse);
-        }
-    }
-
-    get isUDP(): boolean {
-        return ((this.udpSocket !== null) && (this.udpRemoteInfo !== null));
-    }
-}
+import process from 'process';
 
 class CacheObject {
 
@@ -146,332 +23,24 @@ class CacheObject {
 
 }
 
-class RequestProtocolMetrics {
-    udp: number = 0;
-    tcp: number = 0;
-}
-
-class Metrics {
-    fixedResponses: number = 0;
-    readonly localRequests = new RequestProtocolMetrics();
-    remoteRequests: number = 0;
-    remoteRequestErrors: number = 0;
-}
-
-type MessageCallback = (decodedMessage: dnsPacket.DNSPacket) => void;
-
-const createTCPDataHandler = (messageCallback: MessageCallback): ((data: Buffer) => void) => {
-    let readingHeader = true;
-    let buffer = Buffer.of();
-    let bodyLength = 0;
-
-    return (data: Buffer) => {
-        buffer = Buffer.concat([buffer, data]);
-
-        let done = false;
-        while (!done) {
-            if (readingHeader) {
-                if (buffer.byteLength >= 2) {
-                    bodyLength = buffer.readUInt16BE(0);
-                    readingHeader = false;
-                } else {
-                    done = true;
-                }
-            } else {
-                if (buffer.byteLength >= (2 + bodyLength)) {
-                    const decodedMessage = streamDecodeDNSPacket(buffer.slice(0, 2 + bodyLength));
-                    if (decodedMessage) {
-                        messageCallback(decodedMessage);
-                    }
-                    buffer = buffer.slice(2 + bodyLength);
-                    readingHeader = true;
-                    bodyLength = 0;
-                } else {
-                    done = true;
-                }
-            }
-        }
-    };
-};
-
-const createUDPSocket = (socketBufferSizes?: configuration.SocketBufferSizes): dgram.Socket => {
-    let recvBufferSize: number | undefined;
-    let sendBufferSize: number | undefined;
-
-    if (socketBufferSizes) {
-        recvBufferSize = socketBufferSizes.rcvbuf;
-        sendBufferSize = socketBufferSizes.sndbuf;
-    }
-
-    return dgram.createSocket({
-        type: 'udp4',
-        recvBufferSize,
-        sendBufferSize
-    });
-};
-
-type MessageAndClientRemoteInfoCallback = (decodedMessage: dnsPacket.DNSPacket, clientRemoteInfo: ClientRemoteInfo) => void;
-
-interface LocalServer {
-    start(): void;
-}
-
-class UDPLocalServer implements LocalServer {
-
-    private readonly udpServerSocket: dgram.Socket;
-
-    constructor(
-        private readonly configuration: configuration.Configuration,
-        private readonly callback: MessageAndClientRemoteInfoCallback) {
-
-        this.udpServerSocket = createUDPSocket(configuration.udpSocketBufferSizes);
-    }
-
-    start() {
-
-        let udpServerSocketListening = false;
-        this.udpServerSocket.on('error', (err) => {
-            logger.warn(`udpServerSocket error ${formatError(err)}`);
-            if (!udpServerSocketListening) {
-                throw new Error('udp server socket bind error');
-            }
-        });
-
-        this.udpServerSocket.on('listening', () => {
-            udpServerSocketListening = true;
-            logger.info(`udpServerSocket listening on ${stringify(this.udpServerSocket.address())} rcvbuf=${this.udpServerSocket.getRecvBufferSize()} sndbuf=${this.udpServerSocket.getSendBufferSize()}`);
-        });
-
-        this.udpServerSocket.on('message', (message: Buffer, remoteInfo: dgram.RemoteInfo) => {
-            const decodedMessage = decodeDNSPacket(message);
-            if (decodedMessage) {
-                this.callback(decodedMessage, ClientRemoteInfo.createUDP(this.udpServerSocket, remoteInfo));
-            }
-        });
-
-        this.udpServerSocket.bind(
-            this.configuration.listenAddressAndPort.port,
-            this.configuration.listenAddressAndPort.address);
-    }
-}
-
-class TCPLocalServer implements LocalServer {
-
-    private readonly tcpServerSocket: net.Server;
-
-    constructor(
-        private readonly configuration: configuration.Configuration,
-        private readonly callback: MessageAndClientRemoteInfoCallback) {
-
-        this.tcpServerSocket = net.createServer();
-    }
-
-    start() {
-
-        let tcpServerSocketListening = false;
-        this.tcpServerSocket.on('error', (err) => {
-            logger.warn(`tcpServerSocket error ${formatError(err)}`);
-            if (!tcpServerSocketListening) {
-                throw new Error('tcp server socket listen error');
-            }
-        });
-
-        this.tcpServerSocket.on('listening', () => {
-            tcpServerSocketListening = true;
-            logger.info(`tcpServerSocket listening on ${stringify(this.tcpServerSocket.address())}`);
-        });
-
-        this.tcpServerSocket.on('connection', (connection) => {
-
-            connection.on('error', (err) => {
-                logger.warn(`tcp client error ${formatError(err)}`);
-                connection.destroy();
-            });
-
-            connection.on('close', () => {
-
-            });
-
-            connection.on('data', createTCPDataHandler((decodedMessage) => {
-                this.callback(decodedMessage, ClientRemoteInfo.createTCP(connection))
-            }));
-
-            connection.on('timeout', () => {
-                connection.destroy();
-            });
-
-            connection.setTimeout(this.configuration.tcpConnectionTimeoutSeconds * 1000);
-        });
-
-        this.tcpServerSocket.listen(
-            this.configuration.listenAddressAndPort.port,
-            this.configuration.listenAddressAndPort.address);
-    }
-}
-
-// https://tools.ietf.org/html/rfc8484
-class Http2RemoteServerConnection {
-
-    private clientHttp2Session: http2.ClientHttp2Session | null = null;
-
-    private sessionCreationTimeSeconds: number = 0;
-
-    private readonly url: string;
-
-    private readonly path: string;
-
-    private readonly requestTimeoutMilliseconds: number;
-
-    private readonly sessionIdleTimeoutMilliseconds: number;
-
-    private readonly sessionMaxAgeSeconds: number;
-
-    constructor(
-        configuration: configuration.RemoteHttp2Configuration) {
-        this.url = configuration.url;
-        this.path = configuration.path;
-        this.requestTimeoutMilliseconds = configuration.requestTimeoutSeconds * 1000;
-        this.sessionIdleTimeoutMilliseconds = configuration.sessionIdleTimeoutSeconds * 1000;
-        this.sessionMaxAgeSeconds = configuration.sessionMaxAgeSeconds;
-    }
-
-    writeRequest(dnsRequest: dnsPacket.DNSPacket): Promise<dnsPacket.DNSPacket> {
-
-        return new Promise((resolve, reject) => {
-
-            const originalID = dnsRequest.id;
-            dnsRequest.id = 0;
-
-            const outgoingRequestBuffer = encodeDNSPacket(dnsRequest);
-            if (!outgoingRequestBuffer) {
-                reject(new Error('error encoding dns packet'));
-                return;
-            }
-
-            this.createSessionIfNecessary();
-
-            if ((!this.clientHttp2Session) || this.clientHttp2Session.closed || this.clientHttp2Session.destroyed) {
-                reject(new Error('clientHttp2Session invalid state'));
-                return;
-            }
-
-            const request = this.clientHttp2Session.request({
-                'content-type': 'application/dns-message',
-                'content-length': outgoingRequestBuffer.length,
-                'accept': 'application/dns-message',
-                ':method': 'POST',
-                ':path': this.path
-            });
-
-            const responseChunks: Buffer[] = [];
-
-            request.on('data', (chunk: Buffer) => {
-                responseChunks.push(chunk);
-            });
-
-            request.on('error', (error) => {
-                request.close();
-                reject(new Error(`http2 request error error = ${formatError(error)}`));
-            });
-
-            request.setTimeout(this.requestTimeoutMilliseconds);
-            request.on('timeout', () => {
-                request.close();
-                reject(new Error(`http2 request timeout`));
-
-            });
-
-            request.on('response', (headers) => {
-                if (headers[':status'] !== 200) {
-                    request.close();
-                    reject(new Error(`got non-200 http status response ${headers[':status']}`));
-                }
-            });
-
-            request.once('end', () => {
-                if (responseChunks.length === 0) {
-                    request.close();
-                    reject(new Error('responseChunks empty'));
-                } else {
-                    const responseBuffer = Buffer.concat(responseChunks);
-                    const response = decodeDNSPacket(responseBuffer);
-                    if (!response) {
-                        request.close();
-                        reject(new Error('error decoding dns packet'));
-                    } else {
-                        response.id = originalID;
-                        resolve(response);
-                    }
-                }
-            });
-
-            request.end(outgoingRequestBuffer);
-
-        });
-    }
-
-    private createSessionIfNecessary() {
-
-        const nowSeconds = getNowSeconds();
-
-        if (this.clientHttp2Session) {
-            if ((nowSeconds - this.sessionCreationTimeSeconds) > this.sessionMaxAgeSeconds) {
-                logger.info('this.clientHttp2Session is too old, destroying');
-                this.clientHttp2Session.destroy();
-            } else {
-                return;
-            }
-        }
-
-        const newClientHttp2Session = http2.connect(this.url);
-
-        newClientHttp2Session.on('connect', () => {
-            logger.info('newClientHttp2Session on connect');
-        });
-
-        newClientHttp2Session.once('close', () => {
-            logger.info('newClientHttp2Session on close');
-            if (this.clientHttp2Session === newClientHttp2Session) {
-                this.clientHttp2Session = null;
-                logger.info('set this.clientHttp2Session = null');
-            }
-        });
-
-        newClientHttp2Session.on('error', (error) => {
-            logger.info(`newClientHttp2Session on error error = ${formatError(error)}`);
-            newClientHttp2Session.destroy();
-        });
-
-        newClientHttp2Session.on('timeout', () => {
-            logger.info('newClientHttp2Session on timeout');
-            newClientHttp2Session.destroy();
-        });
-
-        newClientHttp2Session.setTimeout(this.sessionIdleTimeoutMilliseconds);
-
-        this.clientHttp2Session = newClientHttp2Session;
-        this.sessionCreationTimeSeconds = nowSeconds;
-    }
-}
-
 class DNSProxy {
 
     private static readonly originalTTLSymbol = Symbol('originalTTL');
 
-    private readonly metrics = new Metrics();
+    private readonly metrics = new metrics.Metrics();
 
     private readonly questionToFixedResponse = new Map<string, dnsPacket.DNSPacket>();
 
     private readonly questionToResponseCache = new ExpiringCache<string, CacheObject>();
 
-    private readonly localServers: LocalServer[] = [];
+    private readonly localServers: netUtils.LocalServer[] = [];
 
-    private readonly http2RemoteServerConnection: Http2RemoteServerConnection;
+    private readonly http2RemoteServerConnection: dohClient.Http2RemoteServerConnection;
 
     constructor(private readonly configuration: configuration.Configuration) {
 
         this.localServers.push(
-            new UDPLocalServer(
+            new udpServer.UDPLocalServer(
                 configuration,
                 (decodeDNSPacket, clientRemoteInfo) => {
                     ++this.metrics.localRequests.udp;
@@ -479,14 +48,14 @@ class DNSProxy {
                 }));
 
         this.localServers.push(
-            new TCPLocalServer(
+            new tcpServer.TCPLocalServer(
                 configuration,
                 (decodeDNSPacket, clientRemoteInfo) => {
                     ++this.metrics.localRequests.tcp;
                     this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo);
                 }));
 
-        this.http2RemoteServerConnection = new Http2RemoteServerConnection(configuration.remoteHttp2Configuration);
+        this.http2RemoteServerConnection = new dohClient.Http2RemoteServerConnection(configuration.remoteHttp2Configuration);
     }
 
     private getQuestionCacheKey(questions?: dnsPacket.DNSQuestion[]): string {
@@ -522,7 +91,7 @@ class DNSProxy {
         let minTTL = this.configuration.minTTLSeconds;
 
         const processObject = (object: { ttl?: number, [DNSProxy.originalTTLSymbol]?: number }) => {
-            if ((!isNumber(object.ttl)) || (object.ttl < this.configuration.minTTLSeconds)) {
+            if ((!utils.isNumber(object.ttl)) || (object.ttl < this.configuration.minTTLSeconds)) {
                 object.ttl = this.configuration.minTTLSeconds;
             }
             if (object.ttl > this.configuration.maxTTLSeconds) {
@@ -550,7 +119,7 @@ class DNSProxy {
     private adjustTTL(cacheObject: CacheObject): boolean {
         let valid = true;
 
-        const nowSeconds = getNowSeconds();
+        const nowSeconds = utils.getNowSeconds();
 
         const secondsUntilExpiration = cacheObject.expirationTimeSeconds - nowSeconds;
 
@@ -561,7 +130,7 @@ class DNSProxy {
 
             const adjustObject = (object: { ttl?: number, readonly [DNSProxy.originalTTLSymbol]?: number }) => {
                 const originalTTL = object[DNSProxy.originalTTLSymbol];
-                if (!isNumber(originalTTL)) {
+                if (!utils.isNumber(originalTTL)) {
                     valid = false;
                 } else {
                     object.ttl = originalTTL - secondsInCache;
@@ -584,7 +153,7 @@ class DNSProxy {
     }
 
     private timerPop() {
-        const nowSeconds = getNowSeconds();
+        const nowSeconds = utils.getNowSeconds();
 
         const expiredCacheKeys = this.questionToResponseCache.periodicCleanUp(nowSeconds);
 
@@ -594,13 +163,13 @@ class DNSProxy {
             cacheStats: this.questionToResponseCache.stats
         };
 
-        logger.info(`end timer pop ${stringify(logData)}`);
+        logger.info(`end timer pop ${utils.stringify(logData)}`);
     }
 
-    private handleLocalRequest(decodedRequestObject: dnsPacket.DNSPacket, clientRemoteInfo: ClientRemoteInfo) {
+    private handleLocalRequest(decodedRequestObject: dnsPacket.DNSPacket, clientRemoteInfo: netUtils.ClientRemoteInfo) {
         // logger.info(`handleLocalRequest message remoteInfo = ${stringifyPretty(clientRemoteInfo)}\ndecodedRequestObject = ${stringifyPretty(decodedRequestObject)}`);
 
-        if ((!isNumber(decodedRequestObject.id)) || (!decodedRequestObject.questions)) {
+        if ((!utils.isNumber(decodedRequestObject.id)) || (!decodedRequestObject.questions)) {
             logger.warn(`handleLocalRequest invalid decodedRequestObject ${decodedRequestObject}`);
             return;
         }
@@ -639,7 +208,7 @@ class DNSProxy {
         }
     }
 
-    private async sendRemoteRequest(clientRemoteInfo: ClientRemoteInfo, request: dnsPacket.DNSPacket) {
+    private async sendRemoteRequest(clientRemoteInfo: netUtils.ClientRemoteInfo, request: dnsPacket.DNSPacket) {
 
         let response: dnsPacket.DNSPacket | undefined;
 
@@ -648,7 +217,7 @@ class DNSProxy {
             response = await this.http2RemoteServerConnection.writeRequest(request);
         } catch (err) {
             ++this.metrics.remoteRequestErrors;
-            logger.error(`http2RemoteServerConnection.writeRequest error err = ${formatError(err)}`);
+            logger.error(`http2RemoteServerConnection.writeRequest error err = ${utils.formatError(err)}`);
         }
 
         if (response) {
@@ -656,10 +225,10 @@ class DNSProxy {
         }
     }
 
-    private handleRemoteResponse(clientRemoteInfo: ClientRemoteInfo, decodedResponseObject: dnsPacket.DNSPacket) {
+    private handleRemoteResponse(clientRemoteInfo: netUtils.ClientRemoteInfo, decodedResponseObject: dnsPacket.DNSPacket) {
         // logger.info(`handleRemoteResponse decodedResponseObject = ${stringifyPretty(decodedResponseObject)}`);
 
-        if (!isNumber(decodedResponseObject.id) || (!decodedResponseObject.questions)) {
+        if (!utils.isNumber(decodedResponseObject.id) || (!decodedResponseObject.questions)) {
             logger.warn(`handleRemoteSocketMessage invalid decodedResponseObject ${decodedResponseObject}`);
             return;
         }
@@ -671,9 +240,9 @@ class DNSProxy {
 
             const minTTLSeconds = this.getMinTTLSecondsForResponse(decodedResponseObject);
 
-            if (isPositiveNumber(minTTLSeconds)) {
+            if (utils.isPositiveNumber(minTTLSeconds)) {
 
-                const nowSeconds = getNowSeconds();
+                const nowSeconds = utils.getNowSeconds();
 
                 const expirationTimeSeconds = nowSeconds + minTTLSeconds;
 
@@ -704,11 +273,11 @@ class DNSProxy {
 const readConfiguration = async (configFilePath: string) => {
     logger.info(`readConfiguration '${configFilePath}'`);
 
-    const fileContent = await asyncReadFile(configFilePath, UTF8);
+    const fileContent = await utils.asyncReadFile(configFilePath, 'utf8');
 
     const configuration = JSON.parse(fileContent.toString()) as configuration.Configuration;
 
-    logger.info(`configuration = ${stringifyPretty(configuration)}`);
+    logger.info(`configuration = ${utils.stringifyPretty(configuration)}`);
 
     return configuration;
 };
@@ -724,6 +293,6 @@ const main = async () => {
 };
 
 main().catch((err) => {
-    logger.error(`main error err = ${formatError(err)}`);
+    logger.error(`main error err = ${utils.formatError(err)}`);
     process.exit(1);
 });
