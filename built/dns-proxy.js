@@ -35,9 +35,7 @@ const asyncReadFile = async (filePath, encoding) => {
     }
 };
 const getNowSeconds = () => {
-    const now = new Date();
-    now.setMilliseconds(0);
-    return now.getTime() / 1000.;
+    return process.hrtime()[0];
 };
 const isNumber = (x) => {
     return (typeof x === 'number');
@@ -253,10 +251,12 @@ class TCPLocalServer {
 class Http2RemoteServerConnection {
     constructor(configuration) {
         this.clientHttp2Session = null;
+        this.sessionCreationTimeSeconds = 0;
         this.url = configuration.url;
         this.path = configuration.path;
         this.requestTimeoutMilliseconds = configuration.requestTimeoutSeconds * 1000;
-        this.sessionTimeoutMilliseconds = configuration.sessionTimeoutSeconds * 1000;
+        this.sessionIdleTimeoutMilliseconds = configuration.sessionIdleTimeoutSeconds * 1000;
+        this.sessionMaxAgeSeconds = configuration.sessionMaxAgeSeconds;
     }
     writeRequest(dnsRequest) {
         return new Promise((resolve, reject) => {
@@ -320,27 +320,39 @@ class Http2RemoteServerConnection {
         });
     }
     createSessionIfNecessary() {
+        const nowSeconds = getNowSeconds();
         if (this.clientHttp2Session) {
-            return;
+            if ((nowSeconds - this.sessionCreationTimeSeconds) > this.sessionMaxAgeSeconds) {
+                logger.info('this.clientHttp2Session is too old, destroying');
+                this.clientHttp2Session.destroy();
+                this.clientHttp2Session = null;
+            }
+            else {
+                return;
+            }
         }
-        const clientHttp2Session = http2.connect(this.url);
-        clientHttp2Session.on('connect', () => {
-            logger.info('clientHttp2Session on connect');
+        const newClientHttp2Session = http2.connect(this.url);
+        newClientHttp2Session.on('connect', () => {
+            logger.info('newClientHttp2Session on connect');
         });
-        clientHttp2Session.once('close', () => {
-            logger.info(`clientHttp2Session on close`);
-            this.clientHttp2Session = null;
+        newClientHttp2Session.once('close', () => {
+            logger.info('newClientHttp2Session on close');
+            if (this.clientHttp2Session == newClientHttp2Session) {
+                this.clientHttp2Session = null;
+                logger.info('set this.clientHttp2Session = null');
+            }
         });
-        clientHttp2Session.on('error', (error) => {
-            logger.info(`clientHttp2Session on error error = ${formatError(error)}`);
-            clientHttp2Session.destroy();
+        newClientHttp2Session.on('newClientHttp2Session', (error) => {
+            logger.info(`newClientHttp2Session on error error = ${formatError(error)}`);
+            newClientHttp2Session.destroy();
         });
-        clientHttp2Session.on('timeout', () => {
-            logger.info(`clientHttp2Session on timeout`);
-            clientHttp2Session.destroy();
+        newClientHttp2Session.on('timeout', () => {
+            logger.info('newClientHttp2Session on timeout');
+            newClientHttp2Session.destroy();
         });
-        clientHttp2Session.setTimeout(this.sessionTimeoutMilliseconds);
-        this.clientHttp2Session = clientHttp2Session;
+        newClientHttp2Session.setTimeout(this.sessionIdleTimeoutMilliseconds);
+        this.clientHttp2Session = newClientHttp2Session;
+        this.sessionCreationTimeSeconds = nowSeconds;
     }
 }
 class DNSProxy {

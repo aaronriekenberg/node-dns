@@ -10,7 +10,8 @@
     "remoteHttp2Configuration": {
         "url": "https://dns.google",
         "path": "/dns-query",
-        "sessionTimeoutSeconds": 90,
+        "sessionIdleTimeoutSeconds": 90,
+        "sessionMaxAgeSeconds": 90,
         "requestTimeoutSeconds": 2
     },
     "minTTLSeconds": 300,

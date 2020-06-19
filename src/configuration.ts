@@ -13,7 +13,8 @@ export interface AddressAndPort {
 export interface RemoteHttp2Configuration {
     readonly url: string,
     readonly path: string,
-    readonly sessionTimeoutSeconds: number,
+    readonly sessionIdleTimeoutSeconds: number,
+    readonly sessionMaxAgeSeconds: number,
     readonly requestTimeoutSeconds: number
 }
 
