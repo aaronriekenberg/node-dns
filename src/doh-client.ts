@@ -9,6 +9,8 @@ export class Http2RemoteServerConnection {
 
     private clientHttp2Session: http2.ClientHttp2Session | null = null;
 
+    private nextSessionNumber: number = 0;
+
     private sessionCreationTimeSeconds: number = 0;
 
     private readonly url: string;
@@ -111,21 +113,23 @@ export class Http2RemoteServerConnection {
 
         if (this.clientHttp2Session) {
             if ((nowSeconds - this.sessionCreationTimeSeconds) > this.sessionMaxAgeSeconds) {
-                logger.info('this.clientHttp2Session is too old, destroying');
-                this.clientHttp2Session.destroy();
+                logger.info('this.clientHttp2Session is too old, closing');
+                this.clientHttp2Session.close();
             } else {
                 return;
             }
         }
 
         const newClientHttp2Session = http2.connect(this.url);
+        const sessionNumber = this.nextSessionNumber++;
+        logger.info(`created newClientHttp2Session ${sessionNumber}`);
 
         newClientHttp2Session.on('connect', () => {
-            logger.info('newClientHttp2Session on connect');
+            logger.info(`newClientHttp2Session ${sessionNumber} on connect`);
         });
 
         newClientHttp2Session.once('close', () => {
-            logger.info('newClientHttp2Session on close');
+            logger.info(`newClientHttp2Session ${sessionNumber} on close`);
             if (this.clientHttp2Session === newClientHttp2Session) {
                 this.clientHttp2Session = null;
                 logger.info('set this.clientHttp2Session = null');
@@ -133,13 +137,13 @@ export class Http2RemoteServerConnection {
         });
 
         newClientHttp2Session.on('error', (error) => {
-            logger.info(`newClientHttp2Session on error error = ${utils.formatError(error)}`);
+            logger.info(`newClientHttp2Session ${sessionNumber} on error error = ${utils.formatError(error)}`);
             newClientHttp2Session.destroy();
         });
 
         newClientHttp2Session.on('timeout', () => {
-            logger.info('newClientHttp2Session on timeout');
-            newClientHttp2Session.destroy();
+            logger.info(`newClientHttp2Session ${sessionNumber} on timeout`);
+            newClientHttp2Session.close();
         });
 
         newClientHttp2Session.setTimeout(this.sessionIdleTimeoutMilliseconds);
