@@ -1,6 +1,7 @@
 import { logger } from './logging.js';
 import * as utils from './utils.js';
 import http2 from 'http2';
+;
 // https://tools.ietf.org/html/rfc8484
 export class Http2RemoteServerConnection {
     constructor(configuration) {
@@ -15,24 +16,26 @@ export class Http2RemoteServerConnection {
     }
     writeRequest(dnsRequest) {
         return new Promise((resolve, reject) => {
-            const originalID = dnsRequest.id;
-            dnsRequest.id = 0;
-            const outgoingRequestBuffer = utils.encodeDNSPacket(dnsRequest);
-            if (!outgoingRequestBuffer) {
-                reject(new Error('error encoding dns packet'));
+            if (dnsRequest?.questions?.length !== 1) {
+                reject(new Error(`unknown request questions length: ${dnsRequest?.questions?.length}`));
                 return;
             }
+            const question = dnsRequest.questions[0];
+            if ((!question.name) || (!question.type)) {
+                reject(new Error(`invalid question: ${utils.stringify(question)}`));
+                return;
+            }
+            const path = `${this.path}?name=${question.name}&type=${question.type}`;
             this.createSessionIfNecessary();
             if ((!this.clientHttp2Session) || this.clientHttp2Session.closed || this.clientHttp2Session.destroyed) {
                 reject(new Error('clientHttp2Session invalid state'));
                 return;
             }
             const request = this.clientHttp2Session.request({
-                'content-type': 'application/dns-message',
-                'content-length': outgoingRequestBuffer.length,
-                'accept': 'application/dns-message',
-                ':method': 'POST',
-                ':path': this.path
+                'content-type': 'application/dns-json',
+                'accept': 'application/dns-json',
+                ':method': 'GET',
+                ':path': path
             });
             const responseChunks = [];
             request.on('data', (chunk) => {
@@ -60,19 +63,87 @@ export class Http2RemoteServerConnection {
                 }
                 else {
                     const responseBuffer = Buffer.concat(responseChunks);
-                    const response = utils.decodeDNSPacket(responseBuffer);
+                    const response = this.decodeJSONResponse(dnsRequest, responseBuffer.toString());
                     if (!response) {
                         request.close();
                         reject(new Error('error decoding dns packet'));
                     }
                     else {
-                        response.id = originalID;
                         resolve(response);
                     }
                 }
             });
-            request.end(outgoingRequestBuffer);
+            request.end();
         });
+    }
+    decodeJSONResponse(dnsRequest, responseString) {
+        try {
+            const responseObject = JSON.parse(responseString);
+            const dnsResponsePacket = dnsRequest;
+            dnsResponsePacket.type = 'response';
+            if (dnsResponsePacket.flags === undefined) {
+                dnsResponsePacket.flags = 0;
+            }
+            // RA
+            dnsResponsePacket.flags |= (1 << 7);
+            // RD
+            dnsResponsePacket.flags |= (1 << 8);
+            if (responseObject.Status === 0) {
+                dnsResponsePacket.rcode = 'NOERROR';
+            }
+            else if (responseObject.Status === 2) {
+                dnsResponsePacket.rcode = 'SERVFAIL';
+                dnsResponsePacket.flags |= 2;
+            }
+            else if (responseObject.Status === 3) {
+                dnsResponsePacket.rcode = 'NXDOMAIN';
+                dnsResponsePacket.flags |= 3;
+            }
+            else {
+                logger.warn(`got unknown responseObject.Status=${responseObject.Status}`);
+                dnsResponsePacket.rcode = 'SERVFAIL';
+                dnsResponsePacket.flags |= 2;
+            }
+            dnsResponsePacket.answers =
+                (responseObject.Answer || []).map(answer => {
+                    let typeString;
+                    if (answer.type === 1) {
+                        typeString = 'A';
+                    }
+                    else if (answer.type === 5) {
+                        typeString = 'CNAME';
+                    }
+                    else if (answer.type === 6) {
+                        typeString = 'SOA';
+                    }
+                    else if (answer.type === 12) {
+                        typeString = 'PTR';
+                    }
+                    else if (answer.type === 28) {
+                        typeString = 'AAAA';
+                    }
+                    else if (answer.type === 33) {
+                        typeString = 'SRV';
+                    }
+                    else {
+                        logger.warn(`got unknown answer.type=${answer.type}`);
+                    }
+                    return {
+                        name: answer.name,
+                        type: typeString,
+                        ttl: answer.TTL,
+                        class: 'IN',
+                        data: answer.data
+                    };
+                });
+            dnsResponsePacket.authorities = [];
+            dnsResponsePacket.additionals = [];
+            return dnsResponsePacket;
+        }
+        catch (err) {
+            logger.error(`decodeJSONResponse error err = ${utils.formatError(err)}`);
+        }
+        return undefined;
     }
     createSessionIfNecessary() {
         const nowSeconds = utils.getNowSeconds();

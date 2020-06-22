@@ -7,7 +7,11 @@ export const RECURSION_DESIRED: number;
 export const TRUNCATED_RESPONSE: number;
 
 export interface DNSAnswer {
+    name?: string;
+    type?: string;
     ttl?: number;
+    class?: string;
+    data?: string;
 }
 
 export interface DNSAdditional {
@@ -27,6 +31,8 @@ export interface DNSQuestion {
 
 export interface DNSPacket {
     id?: number;
+    flags?: number;
+    type?: string;
     rcode?: string;
     questions?: DNSQuestion[];
     answers?: DNSAnswer[];
