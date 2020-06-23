@@ -165,6 +165,8 @@ export class Http2RemoteServerConnection {
                         typeString = 'SOA';
                     } else if (answer.type === 12) {
                         typeString = 'PTR';
+                    } else if (answer.type === 16) {
+                        typeString = 'TXT';
                     } else if (answer.type === 28) {
                         typeString = 'AAAA';
                     } else if (answer.type === 33) {
