@@ -128,6 +128,9 @@ export class Http2RemoteServerConnection {
                     else if (answer.type === 33) {
                         typeString = 'SRV';
                     }
+                    else if (answer.type === 43) {
+                        typeString = 'DS';
+                    }
                     else {
                         logger.warn(`got unknown answer.type=${answer.type}`);
                     }
