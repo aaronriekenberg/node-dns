@@ -17,6 +17,35 @@ interface DOHJSONResponse {
     Answer?: DOHJSONResponseAnswer[];
 };
 
+const decodeDOHJSONRRType = (type?: number): string | undefined => {
+    if (!utils.isNumber(type)) {
+        logger.warn(`got non-number RR type in DOH response: ${type}`);
+        return undefined;
+    }
+
+    switch (type) {
+        case 1:
+            return 'A';
+        case 5:
+            return 'CNAME';
+        case 6:
+            return 'SOA';
+        case 12:
+            return 'PTR';
+        case 16:
+            return 'TXT';
+        case 28:
+            return 'AAAA';
+        case 33:
+            return 'SRV';
+        case 43:
+            return 'DS';
+    }
+
+    logger.warn(`got unknown RR type in DOH response: ${type}`);
+    return undefined;
+};
+
 // https://tools.ietf.org/html/rfc8484
 export class Http2RemoteServerConnection {
 
@@ -156,29 +185,9 @@ export class Http2RemoteServerConnection {
 
             dnsResponsePacket.answers =
                 (responseObject.Answer || []).map(answer => {
-                    let typeString;
-                    if (answer.type === 1) {
-                        typeString = 'A';
-                    } else if (answer.type === 5) {
-                        typeString = 'CNAME';
-                    } else if (answer.type === 6) {
-                        typeString = 'SOA';
-                    } else if (answer.type === 12) {
-                        typeString = 'PTR';
-                    } else if (answer.type === 16) {
-                        typeString = 'TXT';
-                    } else if (answer.type === 28) {
-                        typeString = 'AAAA';
-                    } else if (answer.type === 33) {
-                        typeString = 'SRV';
-                    } else if (answer.type === 43) {
-                        typeString = 'DS';
-                    } else {
-                        logger.warn(`got unknown answer.type=${answer.type}`);
-                    }
                     return {
                         name: answer.name,
-                        type: typeString,
+                        type: decodeDOHJSONRRType(answer.type),
                         ttl: answer.TTL,
                         class: 'IN',
                         data: answer.data
