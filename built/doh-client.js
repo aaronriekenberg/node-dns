@@ -132,12 +132,20 @@ export class Http2RemoteServerConnection {
             }
             dnsResponsePacket.answers =
                 (responseObject.Answer || []).map(answer => {
+                    let name = answer.name;
+                    while (name?.endsWith('.')) {
+                        name = name.slice(0, -1);
+                    }
+                    let data = answer.data;
+                    while (data?.endsWith('.')) {
+                        data = data.slice(0, -1);
+                    }
                     return {
-                        name: answer.name,
+                        name: name,
                         type: decodeDOHJSONRRType(answer.type),
                         ttl: answer.TTL,
                         class: 'IN',
-                        data: answer.data
+                        data: data
                     };
                 });
             dnsResponsePacket.authorities = [];
