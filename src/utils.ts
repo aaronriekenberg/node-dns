@@ -35,6 +35,10 @@ export const isPositiveNumber = (x: number | null | undefined): x is number => {
     return (isNumber(x) && (x > 0));
 };
 
+export const isString = (x: string | null | undefined): x is string => {
+    return (typeof x === 'string');
+};
+
 export const streamDecodeDNSPacket = (buffer: Buffer): dnsPacket.DNSPacket | undefined => {
     let packet: dnsPacket.DNSPacket | undefined;
     try {

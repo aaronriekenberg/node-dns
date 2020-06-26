@@ -15,17 +15,8 @@ export class Http2RemoteServerConnection {
         this.sessionMaxAgeSeconds = configuration.sessionMaxAgeSeconds;
     }
     writeRequest(dnsRequest) {
+        const requestURLPath = dohJson.buildURLPathForRequest(this.path, dnsRequest);
         return new Promise((resolve, reject) => {
-            if (dnsRequest?.questions?.length !== 1) {
-                reject(new Error(`unknown request questions length: ${dnsRequest?.questions?.length}`));
-                return;
-            }
-            const question = dnsRequest.questions[0];
-            if ((!question.name) || (!question.type)) {
-                reject(new Error(`invalid question: ${utils.stringify(question)}`));
-                return;
-            }
-            const path = `${this.path}?name=${question.name}&type=${question.type}`;
             this.createSessionIfNecessary();
             if ((!this.clientHttp2Session) || this.clientHttp2Session.closed || this.clientHttp2Session.destroyed) {
                 reject(new Error('clientHttp2Session invalid state'));
@@ -35,7 +26,7 @@ export class Http2RemoteServerConnection {
                 'content-type': 'application/dns-json',
                 'accept': 'application/dns-json',
                 ':method': 'GET',
-                ':path': path
+                ':path': requestURLPath
             });
             const responseChunks = [];
             request.on('data', (chunk) => {

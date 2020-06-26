@@ -29,6 +29,9 @@ export const isNumber = (x) => {
 export const isPositiveNumber = (x) => {
     return (isNumber(x) && (x > 0));
 };
+export const isString = (x) => {
+    return (typeof x === 'string');
+};
 export const streamDecodeDNSPacket = (buffer) => {
     let packet;
     try {

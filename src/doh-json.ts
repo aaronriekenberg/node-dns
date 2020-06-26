@@ -49,6 +49,20 @@ const decodeDOHJSONRRType = (type?: number): string | undefined => {
     return undefined;
 };
 
+export const buildURLPathForRequest = (path: string, dnsRequest: dnsPacket.DNSPacket): string => {
+    if (dnsRequest?.questions?.length !== 1) {
+        throw new Error(`unknown request questions length: ${dnsRequest?.questions?.length}`);
+    }
+
+    const question = dnsRequest.questions[0];
+
+    if ((!utils.isString(question.name)) || (!utils.isString(question.type))) {
+        throw new Error(`invalid request question: ${utils.stringify(question)}`);
+    }
+
+    return `${path}?name=${question.name}&type=${question.type}`;
+}
+
 export const decodeJSONResponse = (dnsRequest: dnsPacket.DNSPacket, responseString: string): dnsPacket.DNSPacket | undefined => {
     try {
         const responseObject = JSON.parse(responseString) as DOHJSONResponse;

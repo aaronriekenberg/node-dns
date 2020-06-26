@@ -35,21 +35,9 @@ export class Http2RemoteServerConnection {
 
     writeRequest(dnsRequest: dnsPacket.DNSPacket): Promise<dnsPacket.DNSPacket> {
 
+        const requestURLPath = dohJson.buildURLPathForRequest(this.path, dnsRequest);
+
         return new Promise((resolve, reject) => {
-
-            if (dnsRequest?.questions?.length !== 1) {
-                reject(new Error(`unknown request questions length: ${dnsRequest?.questions?.length}`));
-                return;
-            }
-
-            const question = dnsRequest.questions[0];
-
-            if ((!question.name) || (!question.type)) {
-                reject(new Error(`invalid question: ${utils.stringify(question)}`));
-                return;
-            }
-
-            const path = `${this.path}?name=${question.name}&type=${question.type}`;
 
             this.createSessionIfNecessary();
 
@@ -62,7 +50,7 @@ export class Http2RemoteServerConnection {
                 'content-type': 'application/dns-json',
                 'accept': 'application/dns-json',
                 ':method': 'GET',
-                ':path': path
+                ':path': requestURLPath
             });
 
             const responseChunks: Buffer[] = [];
