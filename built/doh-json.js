@@ -40,56 +40,54 @@ export const buildURLPathForRequest = (path, dnsRequest) => {
 export const decodeJSONResponse = (dnsRequest, responseString) => {
     try {
         const responseObject = JSON.parse(responseString);
+        const questions = (responseObject.Question ?? []).map(question => {
+            // strip leading and trailing .
+            const name = question.name?.replace(/^\.|\.$/gm, '');
+            return {
+                name: name,
+                type: decodeDOHJSONRRType(question.type),
+                class: 'IN',
+            };
+        });
+        const answers = (responseObject.Answer ?? []).map(answer => {
+            // strip leading and trailing .
+            const name = answer.name?.replace(/^\.|\.$/gm, '');
+            const data = answer.data?.replace(/^\.|\.$/gm, '');
+            return {
+                name: name,
+                type: decodeDOHJSONRRType(answer.type),
+                ttl: answer.TTL,
+                class: 'IN',
+                data: data
+            };
+        });
         const dnsResponsePacket = {
             id: dnsRequest.id,
-            type: 'response'
+            flags: 0,
+            type: 'response',
+            rcode: 'NOERROR',
+            questions: questions,
+            answers: answers,
+            authorities: [],
+            additionals: []
         };
-        dnsResponsePacket.flags = 0;
-        // RA
-        dnsResponsePacket.flags |= (1 << 7);
-        // RD
-        dnsResponsePacket.flags |= (1 << 8);
-        if (responseObject.Status === 0) {
-            dnsResponsePacket.rcode = 'NOERROR';
+        // RA, RD
+        dnsResponsePacket.flags = (1 << 7) | (1 << 8);
+        if (responseObject.Status !== 0) {
+            if (responseObject.Status === 2) {
+                dnsResponsePacket.rcode = 'SERVFAIL';
+                dnsResponsePacket.flags |= 2;
+            }
+            else if (responseObject.Status === 3) {
+                dnsResponsePacket.rcode = 'NXDOMAIN';
+                dnsResponsePacket.flags |= 3;
+            }
+            else {
+                logger.warn(`got unknown responseObject.Status=${responseObject.Status}`);
+                dnsResponsePacket.rcode = 'SERVFAIL';
+                dnsResponsePacket.flags |= 2;
+            }
         }
-        else if (responseObject.Status === 2) {
-            dnsResponsePacket.rcode = 'SERVFAIL';
-            dnsResponsePacket.flags |= 2;
-        }
-        else if (responseObject.Status === 3) {
-            dnsResponsePacket.rcode = 'NXDOMAIN';
-            dnsResponsePacket.flags |= 3;
-        }
-        else {
-            logger.warn(`got unknown responseObject.Status=${responseObject.Status}`);
-            dnsResponsePacket.rcode = 'SERVFAIL';
-            dnsResponsePacket.flags |= 2;
-        }
-        dnsResponsePacket.questions =
-            (responseObject.Question ?? []).map(question => {
-                // strip leading and trailing .
-                const name = question.name?.replace(/^\.|\.$/gm, '');
-                return {
-                    name: name,
-                    type: decodeDOHJSONRRType(question.type),
-                    class: 'IN',
-                };
-            });
-        dnsResponsePacket.answers =
-            (responseObject.Answer ?? []).map(answer => {
-                // strip leading and trailing .
-                const name = answer.name?.replace(/^\.|\.$/gm, '');
-                const data = answer.data?.replace(/^\.|\.$/gm, '');
-                return {
-                    name: name,
-                    type: decodeDOHJSONRRType(answer.type),
-                    ttl: answer.TTL,
-                    class: 'IN',
-                    data: data
-                };
-            });
-        dnsResponsePacket.authorities = [];
-        dnsResponsePacket.additionals = [];
         return dnsResponsePacket;
     }
     catch (err) {
