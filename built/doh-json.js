@@ -1,6 +1,7 @@
 import { logger } from './logging.js';
 import * as utils from './utils.js';
 ;
+const leadingAndTrailingDotsRegex = /^\.|\.$/gm;
 const decodeDOHJSONRRType = (type) => {
     if (!utils.isNumber(type)) {
         logger.warn(`got non-number RR type in DOH response: ${type}`);
@@ -41,8 +42,7 @@ export const decodeJSONResponse = (dnsRequest, responseString) => {
     try {
         const responseObject = JSON.parse(responseString);
         const questions = (responseObject.Question ?? []).map(question => {
-            // strip leading and trailing .
-            const name = question.name?.replace(/^\.|\.$/gm, '');
+            const name = question.name?.replace(leadingAndTrailingDotsRegex, '');
             return {
                 name: name,
                 type: decodeDOHJSONRRType(question.type),
@@ -50,9 +50,8 @@ export const decodeJSONResponse = (dnsRequest, responseString) => {
             };
         });
         const answers = (responseObject.Answer ?? []).map(answer => {
-            // strip leading and trailing .
-            const name = answer.name?.replace(/^\.|\.$/gm, '');
-            const data = answer.data?.replace(/^\.|\.$/gm, '');
+            const name = answer.name?.replace(leadingAndTrailingDotsRegex, '');
+            const data = answer.data?.replace(leadingAndTrailingDotsRegex, '');
             return {
                 name: name,
                 type: decodeDOHJSONRRType(answer.type),
