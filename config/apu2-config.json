@@ -26,7 +26,7 @@
     "proxyConfiguration": {
         "minTTLSeconds": 300,
         "maxTTLSeconds": 3600,
-        "timerIntervalSeconds": 10
+        "timerIntervalSeconds": 60
     },
     "fixedResponses": [
         {
