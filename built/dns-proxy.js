@@ -71,7 +71,7 @@ class DNSProxy {
         };
         (response.answers || []).forEach((answer) => processObject(answer));
         (response.additionals || []).forEach((additional) => {
-            if (additional.type !== "OPT") {
+            if (additional.type !== 'OPT') {
                 processObject(additional);
             }
         });
@@ -101,7 +101,7 @@ class DNSProxy {
             };
             (cacheObject.decodedResponse.answers || []).forEach((answer) => adjustObject(answer));
             (cacheObject.decodedResponse.additionals || []).forEach((additional) => {
-                if (additional.type !== "OPT") {
+                if (additional.type !== 'OPT') {
                     adjustObject(additional);
                 }
             });
