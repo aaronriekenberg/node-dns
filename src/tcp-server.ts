@@ -43,7 +43,7 @@ export class TCPLocalServer implements netUtils.LocalServer {
     private readonly tcpServerSocket: net.Server;
 
     constructor(
-        private readonly configuration: configuration.Configuration,
+        private readonly configuration: configuration.TCPServerConfiguration,
         private readonly callback: netUtils.MessageAndClientRemoteInfoCallback) {
 
         this.tcpServerSocket = net.createServer();
@@ -83,7 +83,7 @@ export class TCPLocalServer implements netUtils.LocalServer {
                 connection.destroy();
             });
 
-            connection.setTimeout(this.configuration.tcpConnectionTimeoutSeconds * 1000);
+            connection.setTimeout(this.configuration.connectionTimeoutSeconds * 1000);
         });
 
         this.tcpServerSocket.listen(

@@ -16,16 +16,17 @@ class CacheObject {
 }
 class DNSProxy {
     constructor(configuration) {
-        this.configuration = configuration;
         this.metrics = new metrics.Metrics();
         this.questionToFixedResponse = new Map();
         this.questionToResponseCache = new ExpiringCache();
         this.localServers = [];
-        this.localServers.push(new udpServer.UDPLocalServer(configuration, (decodeDNSPacket, clientRemoteInfo) => {
+        this.proxyConfiguration = configuration.proxyConfiguration;
+        this.buildFixedResponses(configuration.fixedResponses);
+        this.localServers.push(new udpServer.UDPLocalServer(configuration.udpServerConfiguration, (decodeDNSPacket, clientRemoteInfo) => {
             ++this.metrics.localRequests.udp;
             this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo);
         }));
-        this.localServers.push(new tcpServer.TCPLocalServer(configuration, (decodeDNSPacket, clientRemoteInfo) => {
+        this.localServers.push(new tcpServer.TCPLocalServer(configuration.tcpServerConfiguration, (decodeDNSPacket, clientRemoteInfo) => {
             ++this.metrics.localRequests.tcp;
             this.handleLocalRequest(decodeDNSPacket, clientRemoteInfo);
         }));
@@ -43,8 +44,8 @@ class DNSProxy {
         });
         return key;
     }
-    buildFixedResponses() {
-        (this.configuration.fixedResponses || []).forEach((fixedResponse) => {
+    buildFixedResponses(fixedResponses) {
+        (fixedResponses || []).forEach((fixedResponse) => {
             const questionCacheKey = this.getQuestionCacheKey(fixedResponse.questions);
             if (!questionCacheKey) {
                 throw new Error('fixed response missing questions');
@@ -55,13 +56,13 @@ class DNSProxy {
     }
     getMinTTLSecondsForResponse(response) {
         let foundRRHeaderTTL = false;
-        let minTTL = this.configuration.minTTLSeconds;
+        let minTTL = this.proxyConfiguration.minTTLSeconds;
         const processObject = (object) => {
-            if ((!utils.isNumber(object.ttl)) || (object.ttl < this.configuration.minTTLSeconds)) {
-                object.ttl = this.configuration.minTTLSeconds;
+            if ((!utils.isNumber(object.ttl)) || (object.ttl < this.proxyConfiguration.minTTLSeconds)) {
+                object.ttl = this.proxyConfiguration.minTTLSeconds;
             }
-            if (object.ttl > this.configuration.maxTTLSeconds) {
-                object.ttl = this.configuration.maxTTLSeconds;
+            if (object.ttl > this.proxyConfiguration.maxTTLSeconds) {
+                object.ttl = this.proxyConfiguration.maxTTLSeconds;
             }
             object[DNSProxy.originalTTLSymbol] = object.ttl;
             if ((!foundRRHeaderTTL) || (object.ttl < minTTL)) {
@@ -184,9 +185,8 @@ class DNSProxy {
     }
     start() {
         logger.info('begin start');
-        this.buildFixedResponses();
         this.localServers.forEach((localServer) => localServer.start());
-        setInterval(() => this.timerPop(), this.configuration.timerIntervalSeconds * 1000);
+        setInterval(() => this.timerPop(), this.proxyConfiguration.timerIntervalSeconds * 1000);
     }
 }
 DNSProxy.originalTTLSymbol = Symbol('originalTTL');

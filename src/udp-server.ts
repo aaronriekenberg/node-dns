@@ -25,10 +25,10 @@ export class UDPLocalServer implements netUtils.LocalServer {
     private readonly udpServerSocket: dgram.Socket;
 
     constructor(
-        private readonly configuration: configuration.Configuration,
+        private readonly configuration: configuration.UDPServerConfiguration,
         private readonly callback: netUtils.MessageAndClientRemoteInfoCallback) {
 
-        this.udpServerSocket = createUDPSocket(configuration.udpSocketBufferSizes);
+        this.udpServerSocket = createUDPSocket(configuration.socketBufferSizes);
     }
 
     start() {

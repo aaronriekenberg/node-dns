@@ -67,7 +67,7 @@ export class TCPLocalServer {
             connection.on('timeout', () => {
                 connection.destroy();
             });
-            connection.setTimeout(this.configuration.tcpConnectionTimeoutSeconds * 1000);
+            connection.setTimeout(this.configuration.connectionTimeoutSeconds * 1000);
         });
         this.tcpServerSocket.listen(this.configuration.listenAddressAndPort.port, this.configuration.listenAddressAndPort.address);
     }

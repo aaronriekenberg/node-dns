@@ -1,11 +1,20 @@
 {
-    "udpSocketBufferSizes": {
-        "sndbuf": 1048576,
-        "rcvbuf": 1048576
+    "udpServerConfiguration": {
+        "socketBufferSizes": {
+            "sndbuf": 1048576,
+            "rcvbuf": 1048576
+        },
+        "listenAddressAndPort": {
+            "address": "192.168.1.1",
+            "port": 10053
+        }
     },
-    "listenAddressAndPort": {
-        "address": "192.168.1.1",
-        "port": 10053
+    "tcpServerConfiguration": {
+        "listenAddressAndPort": {
+            "address": "192.168.1.1",
+            "port": 10053
+        },
+        "connectionTimeoutSeconds": 5
     },
     "remoteHttp2Configuration": {
         "url": "https://cloudflare-dns.com",
@@ -14,11 +23,11 @@
         "sessionMaxAgeSeconds": 600,
         "requestTimeoutSeconds": 2
     },
-    "minTTLSeconds": 300,
-    "maxTTLSeconds": 3600,
-    "requestTimeoutSeconds": 10,
-    "tcpConnectionTimeoutSeconds": 5,
-    "timerIntervalSeconds": 60,
+    "proxyConfiguration": {
+        "minTTLSeconds": 300,
+        "maxTTLSeconds": 3600,
+        "timerIntervalSeconds": 10
+    },
     "fixedResponses": [
         {
             "type": "response",
