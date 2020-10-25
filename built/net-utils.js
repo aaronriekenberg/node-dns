@@ -44,3 +44,12 @@ export class ClientRemoteInfo {
         return ((this.udpSocket !== null) && (this.udpRemoteInfo !== null));
     }
 }
+export const socketConnectionString = (socket) => {
+    try {
+        return `${socket.localAddress}:${socket.localPort} -> ${socket.remoteAddress}:${socket.remotePort}`;
+    }
+    catch (err) {
+        logger.error(`socketConnectionString error err = ${utils.formatError(err)}`);
+        return "UNKNOWN";
+    }
+};

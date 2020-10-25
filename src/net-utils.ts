@@ -3,6 +3,7 @@ import * as utils from './utils.js';
 import dnsPacket from 'dns-packet';
 import dgram from 'dgram';
 import net from 'net';
+import tls from 'tls';
 
 const writeDNSPacketToTCPSocket = (tcpSocket: net.Socket, packet: dnsPacket.DNSPacket) => {
     try {
@@ -61,4 +62,13 @@ export type MessageAndClientRemoteInfoCallback = (decodedMessage: dnsPacket.DNSP
 
 export interface LocalServer {
     start(): void;
+}
+
+export const socketConnectionString = (socket: net.Socket | tls.TLSSocket): string => {
+    try {
+        return `${socket.localAddress}:${socket.localPort} -> ${socket.remoteAddress}:${socket.remotePort}`;
+    } catch (err) {
+        logger.error(`socketConnectionString error err = ${utils.formatError(err)}`);
+        return "UNKNOWN";
+    }
 }

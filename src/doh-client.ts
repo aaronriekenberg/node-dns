@@ -2,6 +2,7 @@ import * as configuration from './configuration.js';
 import * as dohJson from './doh-json.js';
 import { logger } from './logging.js';
 import * as utils from './utils.js';
+import * as netUtils from './net-utils.js';
 import dnsPacket from 'dns-packet';
 import http2 from 'http2';
 
@@ -117,7 +118,7 @@ export class Http2RemoteServerConnection {
         logger.info(`created newClientHttp2Session ${sessionNumber}`);
 
         newClientHttp2Session.on('connect', () => {
-            logger.info(`newClientHttp2Session ${sessionNumber} on connect`);
+            logger.info(`newClientHttp2Session ${sessionNumber} on connect socketConnectionString = ${netUtils.socketConnectionString(newClientHttp2Session.socket)}`);
         });
 
         newClientHttp2Session.once('close', () => {

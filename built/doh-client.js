@@ -1,6 +1,7 @@
 import * as dohJson from './doh-json.js';
 import { logger } from './logging.js';
 import * as utils from './utils.js';
+import * as netUtils from './net-utils.js';
 import http2 from 'http2';
 // https://tools.ietf.org/html/rfc8484
 export class Http2RemoteServerConnection {
@@ -82,7 +83,7 @@ export class Http2RemoteServerConnection {
         const sessionNumber = this.nextSessionNumber++;
         logger.info(`created newClientHttp2Session ${sessionNumber}`);
         newClientHttp2Session.on('connect', () => {
-            logger.info(`newClientHttp2Session ${sessionNumber} on connect`);
+            logger.info(`newClientHttp2Session ${sessionNumber} on connect socketConnectionString = ${netUtils.socketConnectionString(newClientHttp2Session.socket)}`);
         });
         newClientHttp2Session.once('close', () => {
             logger.info(`newClientHttp2Session ${sessionNumber} on close`);
