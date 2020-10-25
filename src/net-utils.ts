@@ -51,9 +51,6 @@ export class ClientRemoteInfo {
         }
     }
 
-    get isUDP(): boolean {
-        return ((this.udpSocket !== null) && (this.udpRemoteInfo !== null));
-    }
 }
 
 export type MessageCallback = (decodedMessage: dnsPacket.DNSPacket) => void;

@@ -40,9 +40,6 @@ export class ClientRemoteInfo {
             writeDNSPacketToTCPSocket(this.tcpSocket, dnsResponse);
         }
     }
-    get isUDP() {
-        return ((this.udpSocket !== null) && (this.udpRemoteInfo !== null));
-    }
 }
 export const socketConnectionString = (socket) => {
     try {
